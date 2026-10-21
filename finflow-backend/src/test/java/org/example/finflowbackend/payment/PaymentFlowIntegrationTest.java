@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * S15 主流程验收（依赖本地 MySQL 与 Redis，S39 换 Testcontainers）：
@@ -56,7 +57,8 @@ class PaymentFlowIntegrationTest extends IntegrationTestBase {
         PaymentOrderResponse order = paymentProcessService.createAndProcess(
                 createRequest("FL-PAID-", "ALIPAY"));
 
-        assertEquals("PENDING", order.status());
+        // 受理返回的是回落后的实时状态；零延迟回调可能在返回前已落库，故允许竞速到后续态（完整链路见日志断言）
+        assertTrue(List.of("PENDING", "PROCESSING", "PAID").contains(order.status()), order.status());
         assertEquals("PAID", awaitFinalStatus(order.id()));
         assertToStatuses(order.id(), List.of("PENDING", "PROCESSING", "PAID"));
         assertCallback(order.id(), "SUCCESS", 1);
@@ -69,7 +71,7 @@ class PaymentFlowIntegrationTest extends IntegrationTestBase {
         PaymentOrderResponse order = paymentProcessService.createAndProcess(
                 createRequest("FL-FAIL-", "WECHAT"));
 
-        assertEquals("PENDING", order.status());
+        assertTrue(List.of("PENDING", "FAILED").contains(order.status()), order.status());
         assertEquals("FAILED", awaitFinalStatus(order.id()));
         assertToStatuses(order.id(), List.of("PENDING", "FAILED"));
         assertCallback(order.id(), "FAILED", 1);
