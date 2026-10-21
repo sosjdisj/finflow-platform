@@ -1,0 +1,4 @@
+# 测试环境：单测不依赖真实中间件（S39 引入 Testcontainers 后替换为真实 MySQL）
+spring:
+  autoconfigure:
+    exclude: org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration

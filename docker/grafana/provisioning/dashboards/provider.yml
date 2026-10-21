@@ -1,0 +1,10 @@
+# S40：面板文件自动加载（docker/grafana/dashboards 目录下的 JSON）
+apiVersion: 1
+
+providers:
+  - name: finflow
+    folder: FinFlow
+    type: file
+    disableDeletion: false
+    options:
+      path: /var/lib/grafana/dashboards

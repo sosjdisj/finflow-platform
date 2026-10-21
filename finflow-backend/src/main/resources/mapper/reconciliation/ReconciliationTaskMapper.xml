@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.example.finflowbackend.reconciliation.mapper.ReconciliationTaskMapper">
+
+    <!-- S28 匹配互斥：行级锁当前读，并发匹配同一任务时串行化 -->
+    <select id="selectForUpdate" resultType="org.example.finflowbackend.reconciliation.entity.ReconciliationTask">
+        SELECT *
+        FROM reconciliation_task
+        WHERE id = #{id}
+        FOR UPDATE
+    </select>
+</mapper>

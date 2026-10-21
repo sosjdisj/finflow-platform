@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.example.finflowbackend.ledger.mapper.AccountLedgerMapper">
+
+    <!-- S19 一致性校验：账户流水净额 -->
+    <select id="sumAmountByAccountId" resultType="long">
+        SELECT COALESCE(SUM(amount), 0)
+        FROM account_ledger
+        WHERE account_id = #{accountId}
+    </select>
+</mapper>

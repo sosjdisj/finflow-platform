@@ -1,0 +1,26 @@
+# prod：敏感配置一律走环境变量，禁止硬编码
+spring:
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST}:${MYSQL_PORT:3306}/${MYSQL_DATABASE}?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=true
+    username: ${MYSQL_USERNAME}
+    password: ${MYSQL_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  data:
+    redis:
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS}
+finflow:
+  auth:
+    jwt:
+      # 生产无默认值：未配置环境变量则启动即失败，避免误用开发密钥
+      secret: ${FINFLOW_JWT_SECRET}
+
+# S40：生产环境不暴露 API 文档与调试 UI
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false

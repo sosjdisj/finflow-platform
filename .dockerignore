@@ -1,0 +1,12 @@
+# 根上下文构建（后端/假渠道需要同时访问 docker/maven-settings.xml）
+# 排除体积大且与镜像无关的目录，避免上下文过大
+**/node_modules/
+**/dist/
+**/target/
+**/.git/
+**/.idea/
+**/.vscode/
+**/*.log
+.env
+.env.*
+data/

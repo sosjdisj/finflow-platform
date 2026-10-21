@@ -1,0 +1,11 @@
+# S40：Grafana 数据源自动预配置——容器网络内直连 prometheus 服务
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: finflow-prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false

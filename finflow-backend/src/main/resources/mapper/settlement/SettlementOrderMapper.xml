@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.example.finflowbackend.settlement.mapper.SettlementOrderMapper">
+
+    <!-- S25 状态推进：行级锁当前读，保证审核与执行并发时读到最新状态 -->
+    <select id="selectForUpdate" resultType="org.example.finflowbackend.settlement.entity.SettlementOrder">
+        SELECT *
+        FROM settlement_order
+        WHERE id = #{id}
+        FOR UPDATE
+    </select>
+</mapper>

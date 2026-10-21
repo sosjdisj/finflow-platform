@@ -1,0 +1,11 @@
+# 集成测试环境：MySQL 由 Testcontainers 容器提供（见 IntegrationTestBase），Redis 走本地 compose。
+spring:
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+# 集成测试：渠道对接指向测试内 HTTP 桩（base-url 由 IntegrationTestBase 动态注入，端口随机）
+finflow:
+  reconciliation:
+    upload-dir: ./target/recon-it

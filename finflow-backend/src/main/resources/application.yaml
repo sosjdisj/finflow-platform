@@ -1,0 +1,65 @@
+spring:
+  application:
+    name: finflow-backend
+  # 本地默认 dev；生产以 --spring.profiles.active=prod 启动
+  profiles:
+    default: dev
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  servlet:
+    multipart:
+      # 文件中心（S38）：商户证件/对账账单等上传上限
+      max-file-size: 20MB
+      max-request-size: 20MB
+server:
+  port: 8080
+
+# S40 可观测性：Actuator 只暴露必要端点，Prometheus 抓取 /actuator/prometheus
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+# S40 链路追踪：traceId 由 TraceIdFilter 写入 MDC（与统一响应体、X-Trace-Id 响应头同源）
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%X{traceId}] %logger{36} - %msg%n"
+
+# MyBatis-Plus：mapper-locations 用 starter 默认值 classpath*:/mapper/**/*.xml
+mybatis-plus:
+  configuration:
+    # 一级缓存作用域降为语句级：同事务内「插入后重查」必须读到新值（防跨语句缓存脏读）
+    local-cache-scope: statement
+finflow:
+  auth:
+    jwt:
+      # 本地开发默认密钥；生产必须用环境变量 FINFLOW_JWT_SECRET 覆盖（见 application-prod.yaml）
+      secret: ${FINFLOW_JWT_SECRET:finflow-local-dev-only-secret-0123456789abcdef}
+      access-token-ttl: 30m
+      refresh-token-ttl: 7d
+  security:
+    # Secret 落库加密密钥（AES-256-GCM，S32）：生产必须用环境变量 FINFLOW_SECRET_ENCRYPT_KEY 覆盖
+    secret-encrypt-key: ${FINFLOW_SECRET_ENCRYPT_KEY:finflow-local-dev-only-encrypt-key}
+  webhook:
+    # 到期扫描间隔（毫秒）——调度技术参数，不走配置中心；业务参数（最大重试次数）已收拢至 system_config（S37）
+    scan-fixed-delay-ms: 60000
+  notification:
+    # 通知邮件发件人（S33）：缺省用 spring.mail.username；SMTP 未配置时邮件渠道自动降级为只记日志
+    mail-from: ${FINFLOW_MAIL_FROM:}
+    # 平台事件（对账异常等）收件邮箱：未配置时平台通知邮件跳过（SKIPPED），站内信不受影响
+    platform-email: ${FINFLOW_PLATFORM_EMAIL:}
+  storage:
+    # 文件中心对象存储（S38）：docker-compose 的 MinIO（9000 S3 API / 9001 控制台），bucket 启动时自动创建
+    endpoint: ${FINFLOW_MINIO_ENDPOINT:http://localhost:9000}
+    access-key: ${FINFLOW_MINIO_ACCESS_KEY:finflow}
+    secret-key: ${FINFLOW_MINIO_SECRET_KEY:finflow123}
+    bucket: ${FINFLOW_MINIO_BUCKET:finflow}
+  remote-channel:
+    # 渠道服务基址：本地假渠道模拟器（独立进程，端口 8090），生产换成真实渠道网关
+    base-url: ${FINFLOW_CHANNEL_BASE_URL:http://localhost:8090}
+    # 签名共享密钥：必须与渠道服务同值（入站通知验签、出站请求签名）
+    secret: ${FINFLOW_CHANNEL_SECRET:finflow-fake-channel-secret}
+  # 风控阈值已收拢至 system_config（S37）：risk.review-threshold / risk.reject-threshold
+  # 对账账单已切 MinIO（S38）：原 finflow.reconciliation.upload-dir 本地存储废弃

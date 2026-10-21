@@ -1,0 +1,19 @@
+server:
+  port: 8090
+
+finflow:
+  fake-channel:
+    # 签名共享密钥：必须与 FinFlow 后端渠道配置一致，用于入站验签与出站通知签名
+    secret: finflow-fake-channel-secret
+    # 异步通知地址前缀，最终地址 {notifyUrl}/{channelCode}/notify
+    notify-url: http://localhost:8080/api/v1/channels
+    # 受理后延迟多少秒才发送异步通知（模拟渠道处理耗时）
+    pay-delay-seconds: 5
+    # 失败概率 [0,1]：Random.nextDouble() < fail-rate 判为 FAILED
+    fail-rate: 0.0
+    # 每笔通知推送次数：>1 模拟渠道重复通知，用于验证对端幂等
+    notify-times: 1
+    # 相邻两次通知的间隔秒数
+    notify-gap-seconds: 1
+    # 接口人为延迟毫秒数：>0 阻塞响应，用于测试上游超时
+    response-delay-ms: 0

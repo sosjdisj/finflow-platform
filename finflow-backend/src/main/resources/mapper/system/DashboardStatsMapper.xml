@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- S36 Dashboard 统计：手写聚合 SQL，跨业务表只读（报表特例），不写任何数据 -->
+<mapper namespace="org.example.finflowbackend.system.mapper.DashboardStatsMapper">
+
+    <!-- 终态成功状态集：PAID 及其后所有正向状态（含退款中/已退款——交易额按成功收款口径） -->
+    <sql id="successStatuses">'PAID','SETTLED','REFUNDING','REFUNDED'</sql>
+
+    <select id="selectPaymentTodaySummary" resultType="org.example.finflowbackend.system.dto.PaymentSummaryRow">
+        SELECT COUNT(*)                                                              AS totalOrders,
+               COALESCE(SUM(CASE WHEN status IN (<include refid="successStatuses"/>) THEN 1 ELSE 0 END), 0)      AS successOrders,
+               COALESCE(SUM(CASE WHEN status IN (<include refid="successStatuses"/>) THEN amount ELSE 0 END), 0) AS successAmount,
+               COALESCE(SUM(CASE WHEN status IN ('FAILED', 'CLOSED') THEN 1 ELSE 0 END), 0)                      AS abnormalOrders
+        FROM payment_order
+        WHERE DATE(created_at) = CURDATE()
+    </select>
+
+    <select id="selectTodayRefundAmount" resultType="long">
+        SELECT COALESCE(SUM(refund_amount), 0)
+        FROM refund_order
+        WHERE status = 'SUCCESS' AND DATE(refunded_at) = CURDATE()
+    </select>
+
+    <select id="selectTodaySettlementAmount" resultType="long">
+        SELECT COALESCE(SUM(total_amount), 0)
+        FROM settlement_order
+        WHERE status = 'SUCCESS' AND DATE(executed_at) = CURDATE()
+    </select>
+
+    <select id="selectTodayPlatformFee" resultType="long">
+        SELECT COALESCE(SUM(platform_fee), 0)
+        FROM clearing_order
+        WHERE settle_date = CURDATE()
+    </select>
+
+    <select id="selectTodayRiskRejectCount" resultType="long">
+        SELECT COUNT(*)
+        FROM risk_event
+        WHERE verdict = 'REJECT' AND DATE(created_at) = CURDATE()
+    </select>
+
+    <select id="selectTradeAmountTrend" resultType="org.example.finflowbackend.system.dto.TrendAmountRow">
+        SELECT DATE(created_at) AS statDate, COALESCE(SUM(amount), 0) AS amount
+        FROM payment_order
+        WHERE status IN (<include refid="successStatuses"/>)
+          AND DATE(created_at) &gt;= CURDATE() - INTERVAL (#{days} - 1) DAY
+        GROUP BY DATE(created_at)
+    </select>
+
+    <select id="selectSuccessRateTrend" resultType="org.example.finflowbackend.system.dto.TrendCountRow">
+        SELECT DATE(created_at) AS statDate,
+               COUNT(*)         AS total,
+               COALESCE(SUM(CASE WHEN status IN (<include refid="successStatuses"/>) THEN 1 ELSE 0 END), 0) AS success
+        FROM payment_order
+        WHERE DATE(created_at) &gt;= CURDATE() - INTERVAL (#{days} - 1) DAY
+        GROUP BY DATE(created_at)
+    </select>
+
+    <select id="selectRefundTrend" resultType="org.example.finflowbackend.system.dto.TrendAmountRow">
+        SELECT DATE(refunded_at) AS statDate, COALESCE(SUM(refund_amount), 0) AS amount
+        FROM refund_order
+        WHERE status = 'SUCCESS' AND refunded_at IS NOT NULL
+          AND DATE(refunded_at) &gt;= CURDATE() - INTERVAL (#{days} - 1) DAY
+        GROUP BY DATE(refunded_at)
+    </select>
+
+    <select id="selectChannelShare" resultType="org.example.finflowbackend.system.dto.DashboardChannelRow">
+        SELECT channel_code AS channelCode, COALESCE(SUM(pay_amount), 0) AS amount
+        FROM clearing_order
+        WHERE settle_date &gt;= CURDATE() - INTERVAL (#{days} - 1) DAY
+        GROUP BY channel_code
+    </select>
+
+    <select id="selectMerchantTop" resultType="org.example.finflowbackend.system.dto.DashboardMerchantRow">
+        SELECT co.merchant_id     AS merchantId,
+               m.merchant_name    AS merchantName,
+               COALESCE(SUM(co.pay_amount), 0) AS amount
+        FROM clearing_order co
+                 JOIN merchant m ON m.id = co.merchant_id
+        WHERE co.settle_date &gt;= CURDATE() - INTERVAL (#{days} - 1) DAY
+        GROUP BY co.merchant_id, m.merchant_name
+        ORDER BY amount DESC
+            LIMIT 10
+    </select>
+
+</mapper>

@@ -1,0 +1,19 @@
+# 环境与密钥（生产密钥不入库）
+.env
+.env.prod
+.env.local
+
+# 构建产物与依赖
+target/
+dist/
+node_modules/
+*.log
+.deploy-build.log
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# 运行数据
+data/

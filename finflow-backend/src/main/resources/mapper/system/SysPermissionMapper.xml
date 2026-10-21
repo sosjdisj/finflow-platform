@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.example.finflowbackend.system.mapper.SysPermissionMapper">
+
+    <!-- 用户 → 角色 → 权限：只取启用权限，禁用即失效 -->
+    <select id="selectPermissionCodesByUserId" resultType="string">
+        SELECT DISTINCT p.code
+        FROM sys_user_role ur
+                 JOIN sys_role_permission rp ON rp.role_id = ur.role_id
+                 JOIN sys_permission p ON p.id = rp.permission_id
+        WHERE ur.user_id = #{userId}
+          AND p.status = 1
+        ORDER BY p.code
+    </select>
+
+    <!-- 全量启用权限：内置超级管理员授权专用 -->
+    <select id="selectAllEnabledCodes" resultType="string">
+        SELECT p.code
+        FROM sys_permission p
+        WHERE p.status = 1
+        ORDER BY p.code
+    </select>
+
+</mapper>
