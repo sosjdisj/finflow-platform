@@ -25,9 +25,10 @@ jobs:
           cache: maven
           cache-dependency-path: ${{ matrix.module }}/pom.xml
 
-      # 复用根目录 docker-compose.yml 起 Redis/Kafka（与本地开发同一份编排）
-      - name: 启动中间件（Redis + Kafka）
-        run: docker compose up -d --wait redis kafka
+      # 复用根目录 docker-compose.yml 起 Redis/Kafka/MinIO（与本地开发同一份编排）
+      # MinIO 供 S38 文件中心 + 对账上传集成测试使用，缺它会导致 FILE_STORE_FAILED
+      - name: 启动中间件（Redis + Kafka + MinIO）
+        run: docker compose up -d --wait redis kafka minio
 
       - name: 编译 + 单测（MySQL 由 Testcontainers 提供）
         working-directory: ${{ matrix.module }}
