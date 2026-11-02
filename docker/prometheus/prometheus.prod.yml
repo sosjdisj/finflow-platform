@@ -1,4 +1,5 @@
-# S41：容器部署下 Prometheus 抓取配置——按 compose 服务名访问后端
+# S41：容器部署下 Prometheus 抓取配置——按 compose 服务名访问各部署单元
+# M15：渠道 / 风控 / 通知与 backend 一起抓取，Grafana 按 application 标签区分服务（网关未容器化，不在本文件）
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
@@ -8,3 +9,19 @@ scrape_configs:
     metrics_path: /actuator/prometheus
     static_configs:
       - targets: ['backend:8080']
+  - job_name: finflow-channel
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ['channel:8092']
+  - job_name: finflow-risk
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ['risk:8093']
+  - job_name: finflow-notify
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ['notify:8094']
+  - job_name: finflow-batch
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ['batch:8095']

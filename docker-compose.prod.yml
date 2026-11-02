@@ -73,6 +73,34 @@ services:
       retries: 30
     restart: unless-stopped
 
+  # M08 服务注册：Nacos 单机（backend 与 channel 按服务名互调）
+  # 客户端 gRPC 需要 9848/9849（8848+1000 偏移），只映射 8848 会导致注册失败
+  nacos:
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/nacos/nacos-server:v3.1.1
+    container_name: finflow-nacos
+    ports:
+      - "8848:8848"
+      - "9848:9848"
+      - "9849:9849"
+    environment:
+      MODE: standalone
+      NACOS_AUTH_ENABLE: "false"
+      # Nacos 3 启动脚本即使关闭鉴权也强制要求这三项，本地部署用固定值；生产需换真实密钥
+      NACOS_AUTH_TOKEN: "SecretKey012345678901234567890123456789012345678901234567890123456789"
+      NACOS_AUTH_IDENTITY_KEY: finflow
+      NACOS_AUTH_IDENTITY_VALUE: finflow
+    volumes:
+      - nacos-data:/home/nacos/data
+    restart: unless-stopped
+
+  # M08 流控/熔断控制台（sentinel / sentinel），backend 与 channel 各自 transport 上报
+  sentinel-dashboard:
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/bladex/sentinel-dashboard:1.8.8
+    container_name: finflow-sentinel
+    ports:
+      - "8858:8858"
+    restart: unless-stopped
+
   minio:
     image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/minio/minio:latest
     container_name: finflow-minio
@@ -97,15 +125,177 @@ services:
     container_name: finflow-fake-channel
     environment:
       FINFLOW_FAKE_CHANNEL_SECRET: ${FINFLOW_CHANNEL_SECRET:-finflow-fake-channel-secret}
-      FINFLOW_FAKE_CHANNEL_NOTIFY_URL: http://backend:8080/api/v1/channels
+      # 渠道异步通知先到渠道服务（M08 remote），再由渠道服务转给 backend 内部端点
+      # 回退 local 模式时需改为 http://backend:8080/api/v1/channels
+      FINFLOW_FAKE_CHANNEL_NOTIFY_URL: ${FINFLOW_FAKE_CHANNEL_NOTIFY_URL:-http://channel:8092/api/v1/channels}
     ports:
       - "8090:8090"
+    restart: unless-stopped
+
+  # M08 渠道服务：与 backend 同一份镜像（Dockerfile target channel-runtime），独立进程 8092
+  channel:
+    build:
+      context: .
+      dockerfile: finflow-backend/Dockerfile
+      target: channel-runtime
+    image: finflow-channel:local
+    container_name: finflow-channel
+    environment:
+      MYSQL_HOST: ${MYSQL_HOST:-host.docker.internal}
+      MYSQL_PORT: ${MYSQL_PORT:-3306}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-finflow}
+      MYSQL_USERNAME: ${MYSQL_USERNAME:-root}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-2369}
+      NACOS_SERVER_ADDR: nacos:8848
+      SENTINEL_DASHBOARD: sentinel-dashboard:8858
+      FINFLOW_CHANNEL_BASE_URL: http://fake-channel:8090
+      FINFLOW_CHANNEL_SECRET: ${FINFLOW_CHANNEL_SECRET:-finflow-fake-channel-secret}
+      # 渠道回调验签后转给 backend（payment 落状态）
+      FINFLOW_BACKEND_URL: http://backend:8080
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8092:8092"
+    depends_on:
+      nacos:
+        condition: service_started
+      fake-channel:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8092"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 45s
+    restart: unless-stopped
+
+  # M11 风控服务：与 backend 同一份镜像（Dockerfile target risk-runtime），独立进程 8093
+  risk:
+    build:
+      context: .
+      dockerfile: finflow-backend/Dockerfile
+      target: risk-runtime
+    image: finflow-risk:local
+    container_name: finflow-risk
+    environment:
+      MYSQL_HOST: ${MYSQL_HOST:-host.docker.internal}
+      MYSQL_PORT: ${MYSQL_PORT:-3306}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-finflow}
+      MYSQL_USERNAME: ${MYSQL_USERNAME:-root}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-2369}
+      REDIS_HOST: redis
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      NACOS_SERVER_ADDR: nacos:8848
+      SENTINEL_DASHBOARD: sentinel-dashboard:8858
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8093:8093"
+    depends_on:
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      nacos:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8093"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 45s
+    restart: unless-stopped
+
+  # M16 通知服务：与 backend 同一份镜像（Dockerfile target notify-runtime），独立进程 8094
+  notify:
+    build:
+      context: .
+      dockerfile: finflow-backend/Dockerfile
+      target: notify-runtime
+    image: finflow-notify:local
+    container_name: finflow-notify
+    environment:
+      MYSQL_HOST: ${MYSQL_HOST:-host.docker.internal}
+      MYSQL_PORT: ${MYSQL_PORT:-3306}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-finflow}
+      MYSQL_USERNAME: ${MYSQL_USERNAME:-root}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-2369}
+      REDIS_HOST: redis
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      NACOS_SERVER_ADDR: nacos:8848
+      SENTINEL_DASHBOARD: sentinel-dashboard:8858
+      # 解密 notify_merchant_config.secret_cipher：必须与 backend 同值
+      FINFLOW_SECRET_ENCRYPT_KEY: ${FINFLOW_SECRET_ENCRYPT_KEY:-finflow-local-dev-only-encrypt-key}
+      MAIL_HOST: ${MAIL_HOST:-}
+      MAIL_PORT: ${MAIL_PORT:-25}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      FINFLOW_MAIL_FROM: ${FINFLOW_MAIL_FROM:-}
+      FINFLOW_PLATFORM_EMAIL: ${FINFLOW_PLATFORM_EMAIL:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8094:8094"
+    depends_on:
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      nacos:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8094"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 45s
+    restart: unless-stopped
+
+  # M17 批处理服务：与 backend 同一份镜像（Dockerfile target batch-runtime），独立进程 8095
+  # 夜间对账匹配只在批处理进程执行，不与在线支付争抢线程池与堆
+  batch:
+    build:
+      context: .
+      dockerfile: finflow-backend/Dockerfile
+      target: batch-runtime
+    image: finflow-batch:local
+    container_name: finflow-batch
+    environment:
+      MYSQL_HOST: ${MYSQL_HOST:-host.docker.internal}
+      MYSQL_PORT: ${MYSQL_PORT:-3306}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-finflow}
+      MYSQL_USERNAME: ${MYSQL_USERNAME:-root}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-2369}
+      REDIS_HOST: redis
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      NACOS_SERVER_ADDR: nacos:8848
+      SENTINEL_DASHBOARD: sentinel-dashboard:8858
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8095:8095"
+    depends_on:
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      nacos:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8095"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 45s
     restart: unless-stopped
 
   backend:
     build:
       context: .
       dockerfile: finflow-backend/Dockerfile
+      # 必须显式指定 backend 运行阶段：Dockerfile 最后一段是 batch-runtime，
+      # 不写 target 会默认取最后一段，把批处理 jar 装进 backend 镜像
+      target: runtime
     image: finflow-backend:local
     container_name: finflow-backend
     environment:
@@ -127,6 +317,18 @@ services:
       FINFLOW_MINIO_BUCKET: finflow
       FINFLOW_CHANNEL_BASE_URL: http://fake-channel:8090
       FINFLOW_CHANNEL_SECRET: ${FINFLOW_CHANNEL_SECRET:-finflow-fake-channel-secret}
+      # M08 渠道调用切换为独立服务（Feign + Sentinel）；回退时改 FINFLOW_CHANNEL_MODE=local
+      FINFLOW_CHANNEL_MODE: ${FINFLOW_CHANNEL_MODE:-remote}
+      # M11 风控调用切换为独立服务（Feign + Sentinel，降级按 M09 策略）；回退时改 FINFLOW_RISK_MODE=local
+      FINFLOW_RISK_MODE: ${FINFLOW_RISK_MODE:-remote}
+      # M16 通知 / Webhook 管理切换为独立服务；消费与重试只在通知进程执行，避免重复投递。
+      # 回退单进程时改 FINFLOW_NOTIFY_MODE=local、FINFLOW_NOTIFY_WORKER=true
+      FINFLOW_NOTIFY_MODE: ${FINFLOW_NOTIFY_MODE:-remote}
+      FINFLOW_NOTIFY_WORKER: ${FINFLOW_NOTIFY_WORKER:-false}
+      # M17 夜间对账批处理只在批处理服务执行；回退单进程时改 FINFLOW_BATCH_WORKER=true
+      FINFLOW_BATCH_WORKER: ${FINFLOW_BATCH_WORKER:-false}
+      NACOS_SERVER_ADDR: nacos:8848
+      SENTINEL_DASHBOARD: sentinel-dashboard:8858
     # Linux 宿主机下访问宿主 MySQL / 直接访问宿主资源的固定写法
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -138,6 +340,14 @@ services:
       kafka:
         condition: service_healthy
       minio:
+        condition: service_started
+      nacos:
+        condition: service_started
+      channel:
+        condition: service_started
+      risk:
+        condition: service_started
+      notify:
         condition: service_started
     healthcheck:
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080"]
@@ -190,6 +400,7 @@ services:
 volumes:
   mysql-data:
   redis-data:
+  nacos-data:
   minio-data:
   prometheus-data:
   grafana-data:

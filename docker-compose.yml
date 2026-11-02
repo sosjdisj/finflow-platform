@@ -37,6 +37,33 @@ services:
       timeout: 10s
       retries: 30
 
+  # M01 微服务基线：Nacos 单机（注册 + 配置），Derby 内嵌库，控制台 8081 -> 容器 8080（后端已占 8080）
+  # 客户端 gRPC 需要 9848/9849（8848+1000 偏移），只映射 8848 会导致注册失败
+  nacos:
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/nacos/nacos-server:v3.1.1
+    container_name: finflow-nacos
+    ports:
+      - "8848:8848"
+      - "9848:9848"
+      - "9849:9849"
+      - "8081:8080"
+    environment:
+      MODE: standalone
+      NACOS_AUTH_ENABLE: "false"
+      # Nacos 3 启动脚本即使关闭鉴权也强制要求这三项，本地开发用固定值；生产需用真实密钥
+      NACOS_AUTH_TOKEN: "SecretKey012345678901234567890123456789012345678901234567890123456789"
+      NACOS_AUTH_IDENTITY_KEY: finflow
+      NACOS_AUTH_IDENTITY_VALUE: finflow
+    volumes:
+      - nacos-data:/home/nacos/data
+
+  # M01 微服务基线：Sentinel 控制台（sentinel / sentinel），网关通过 transport.dashboard 上报
+  sentinel-dashboard:
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/bladex/sentinel-dashboard:1.8.8
+    container_name: finflow-sentinel
+    ports:
+      - "8858:8858"
+
   # S38 文件中心：对象存储（9000 S3 API / 9001 控制台），bucket 由应用启动时自动创建
   # 镜像用华为云同步源（官方 docker.io 国内拉取 403/502，2026-10 实测）
   minio:
@@ -88,6 +115,7 @@ services:
 
 volumes:
   redis-data:
+  nacos-data:
   minio-data:
   prometheus-data:
   grafana-data:

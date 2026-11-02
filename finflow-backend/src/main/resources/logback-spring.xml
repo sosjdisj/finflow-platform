@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  M15 日志格式：每行带服务名 + traceId + spanId。
+  服务名来自 spring.application.name（backend / risk / channel 同源打包，各自解析为真名），
+  traceId 由 Micrometer Tracing 写入 MDC，四个进程串成一笔支付的完整链路。
+-->
+<configuration>
+    <springProperty scope="context" name="serviceName" source="spring.application.name" defaultValue="finflow"/>
+    <property name="LOG_PATTERN"
+              value="%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%property{serviceName}] [%X{traceId:-}] [%X{spanId:-}] %logger{36} - %msg%n"/>
+
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${LOG_PATTERN}</pattern>
+        </encoder>
+    </appender>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+</configuration>

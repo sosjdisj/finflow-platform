@@ -1,5 +1,6 @@
 # S40：Prometheus 抓取配置
-# 应用在本机 8080 运行，容器内经 host.docker.internal 访问；S41 应用容器化后把 target 换成 compose 服务名
+# 应用在本机多进程运行（backend 8080 / 网关 8091 / 渠道 8092 / 风控 8093），容器内经 host.docker.internal 访问；
+# M15：四个部署单元都按同一 application 标签进看板，Grafana 可按服务筛选与对比
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
@@ -9,3 +10,15 @@ scrape_configs:
     metrics_path: /actuator/prometheus
     static_configs:
       - targets: ['host.docker.internal:8080']
+  - job_name: finflow-gateway
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ['host.docker.internal:8091']
+  - job_name: finflow-channel
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ['host.docker.internal:8092']
+  - job_name: finflow-risk
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ['host.docker.internal:8093']
