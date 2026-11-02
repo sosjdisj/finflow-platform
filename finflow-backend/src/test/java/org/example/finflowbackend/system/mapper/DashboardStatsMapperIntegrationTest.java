@@ -220,7 +220,7 @@ class DashboardStatsMapperIntegrationTest extends IntegrationTestBase {
     private void insertRiskEvent(long merchantId, String verdict, LocalDateTime createdAt) {
         String suffix = String.valueOf(SEQ.incrementAndGet());
         jdbcTemplate.update("""
-                INSERT INTO risk_event (event_no, order_id, merchant_id, amount, hit_rules, total_score,
+                INSERT INTO finflow_risk.risk_event (event_no, order_id, merchant_id, amount, hit_rules, total_score,
                                         verdict, created_at)
                 VALUES (?, ?, ?, 100, NULL, 0, ?, ?)
                 """, "REDASH" + suffix, SEQ.incrementAndGet(), merchantId, verdict, createdAt);
