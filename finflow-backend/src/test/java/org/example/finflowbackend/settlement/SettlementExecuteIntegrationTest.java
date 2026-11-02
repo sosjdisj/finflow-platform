@@ -1,17 +1,22 @@
 package org.example.finflowbackend.settlement;
 
+import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.AdminClientConfig;
+import org.apache.kafka.clients.admin.OffsetSpec;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.clients.consumer.OffsetAndMetadata;
+import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.StringDeserializer;
-import org.example.finflowbackend.account.AccountErrorCode;
-import org.example.finflowbackend.account.AccountOwnerType;
-import org.example.finflowbackend.account.entity.Account;
+import org.example.finflowbackend.account.api.AccountErrorCode;
+import org.example.finflowbackend.account.api.AccountOwnerType;
+import org.example.finflowbackend.account.api.AccountSnapshot;
 import org.example.finflowbackend.account.service.AccountService;
 import org.example.finflowbackend.common.exception.BusinessException;
+import org.example.finflowbackend.contract.EventTopics;
 import org.example.finflowbackend.ledger.service.LedgerService;
 import org.example.finflowbackend.settlement.entity.SettlementOrder;
-import org.example.finflowbackend.settlement.event.SettlementTopics;
 import org.example.finflowbackend.settlement.mapper.SettlementOrderMapper;
 import org.example.finflowbackend.settlement.service.SettlementExecuteService;
 import org.example.finflowbackend.settlement.service.SettlementGenerateService;
@@ -22,9 +27,12 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.time.LocalDate;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -38,6 +46,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class SettlementExecuteIntegrationTest extends IntegrationTestBase {
 
     private static final long SETTLE_AMOUNT = 9700L;
+    private static final String BOOTSTRAP_SERVERS = "localhost:9092";
+    /** 账务消费者组（PaymentLedgerConsumer / RefundLedgerConsumer 共用）。 */
+    private static final String LEDGER_GROUP_ID = "finflow-ledger";
+    private static final long EVENT_DRAIN_TIMEOUT_MS = 15_000L;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -58,7 +70,10 @@ class SettlementExecuteIntegrationTest extends IntegrationTestBase {
     private long orderSeq;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
+        // 平台备付金是全局共享账户，会被支付/退款事件异步入账；先等账务消费者追平积压，
+        // 否则迟到的入账会把本用例构造的余额差额填平（余额不足不再触发）
+        awaitLedgerConsumerDrained();
         suffix = Long.toHexString(System.nanoTime());
         orderSeq = 800_000_000_000L + Long.parseLong(suffix.substring(0, 8), 16);
         String name = "结算执行验收商户-" + suffix;
@@ -83,15 +98,15 @@ class SettlementExecuteIntegrationTest extends IntegrationTestBase {
     @Test
     void approveAndExecuteMovesMoneyAndLedgerBalances() throws Exception {
         try (KafkaConsumer<String, String> consumer = new KafkaConsumer<>(consumerProps())) {
-            consumer.subscribe(List.of(SettlementTopics.TOPIC_SETTLEMENT_SUCCEEDED));
+            consumer.subscribe(List.of(EventTopics.SETTLEMENT_SUCCEEDED));
             // 订阅就位后再触发链路，避免漏收
             Thread.sleep(1000);
 
             SettlementOrder order = generateApprovedOrder("it-admin");
             // 平台备付金是共享账户（历史运行/其他用例会抽干余额），先垫足再断言相对值
-            Account platform = platformAccount();
-            adjust(platform.getId(), 1_000_000L);
-            long platformBefore = accountService.getAccount(platform.getId()).getAvailableBalance();
+            AccountSnapshot platform = platformAccount();
+            adjust(platform.id(), 1_000_000L);
+            long platformBefore = accountService.getAccount(platform.id()).getAvailableBalance();
 
             executeService.execute(order.getId());
 
@@ -100,11 +115,11 @@ class SettlementExecuteIntegrationTest extends IntegrationTestBase {
             assertNotNull(after.getExecutedAt());
 
             // 商户账户（新 suffix 商户必为新户）：0 → 应付额
-            Account merchant = accountService.getOrCreate(AccountOwnerType.MERCHANT, merchantId, "CNY");
-            assertEquals(SETTLE_AMOUNT, merchant.getAvailableBalance());
+            AccountSnapshot merchant = accountService.getOrCreate(AccountOwnerType.MERCHANT, merchantId, "CNY");
+            assertEquals(SETTLE_AMOUNT, merchant.availableBalance());
             // 平台备付金：出账应付额
             assertEquals(platformBefore - SETTLE_AMOUNT,
-                    accountService.getAccount(platform.getId()).getAvailableBalance());
+                    accountService.getAccount(platform.id()).getAvailableBalance());
 
             // 两笔流水（bizType=SETTLEMENT, bizNo=settleNo）：平台出、商户入
             Long ledgerCount = jdbcTemplate.queryForObject("""
@@ -113,14 +128,14 @@ class SettlementExecuteIntegrationTest extends IntegrationTestBase {
             assertEquals(2L, ledgerCount);
             assertEquals(-SETTLE_AMOUNT, jdbcTemplate.queryForObject("""
                             SELECT amount FROM account_ledger WHERE biz_type = 'SETTLEMENT' AND biz_no = ? AND account_id = ?
-                            """, Long.class, order.getSettleNo(), platform.getId()));
+                            """, Long.class, order.getSettleNo(), platform.id()));
             assertEquals(SETTLE_AMOUNT, jdbcTemplate.queryForObject("""
                             SELECT amount FROM account_ledger WHERE biz_type = 'SETTLEMENT' AND biz_no = ? AND account_id = ?
-                            """, Long.class, order.getSettleNo(), merchant.getId()));
+                            """, Long.class, order.getSettleNo(), merchant.id()));
 
             // 流水能对平：两账户 余额 = Σ流水
-            assertTrue(ledgerService.consistencyCheck(platform.getId()).consistent());
-            assertTrue(ledgerService.consistencyCheck(merchant.getId()).consistent());
+            assertTrue(ledgerService.consistencyCheck(platform.id()).consistent());
+            assertTrue(ledgerService.consistencyCheck(merchant.id()).consistent());
 
             // 留痕链完整：CALCULATED→APPROVED→PROCESSING→SUCCESS
             List<String> transitions = jdbcTemplate.queryForList("""
@@ -132,7 +147,7 @@ class SettlementExecuteIntegrationTest extends IntegrationTestBase {
 
             // 结算完成事件已发布 Kafka（payload 含本单单号）
             boolean received = pollAll(consumer, 15).stream()
-                    .anyMatch(r -> r.topic().equals(SettlementTopics.TOPIC_SETTLEMENT_SUCCEEDED)
+                    .anyMatch(r -> r.topic().equals(EventTopics.SETTLEMENT_SUCCEEDED)
                             && r.value().contains(order.getSettleNo()));
             assertTrue(received, "未收到本结算单的 SETTLEMENT_SUCCEEDED 事件");
         }
@@ -150,11 +165,11 @@ class SettlementExecuteIntegrationTest extends IntegrationTestBase {
     @Test
     void insufficientBalanceMarksFailedAndRetrySucceeds() {
         // 构造备付金不足：先垫大额再调减到低于应付额（平台户是共享账户，余额不可预设）
-        Account platform = platformAccount();
-        adjust(platform.getId(), 5_000_000L);
-        long current = accountService.getAccount(platform.getId()).getAvailableBalance();
-        adjust(platform.getId(), -(current - SETTLE_AMOUNT + 1));
-        long beforeFailed = accountService.getAccount(platform.getId()).getAvailableBalance();
+        AccountSnapshot platform = platformAccount();
+        adjust(platform.id(), 5_000_000L);
+        long current = accountService.getAccount(platform.id()).getAvailableBalance();
+        adjust(platform.id(), -(current - SETTLE_AMOUNT + 1));
+        long beforeFailed = accountService.getAccount(platform.id()).getAvailableBalance();
 
         SettlementOrder order = generateApprovedOrder("it-admin");
         BusinessException error = assertThrows(BusinessException.class,
@@ -166,7 +181,7 @@ class SettlementExecuteIntegrationTest extends IntegrationTestBase {
         assertEquals("FAILED", failed.getStatus());
         assertNotNull(failed.getFailReason());
         // 事务回滚：钱没动、无结算流水、商户未建户
-        assertEquals(beforeFailed, accountService.getAccount(platform.getId()).getAvailableBalance());
+        assertEquals(beforeFailed, accountService.getAccount(platform.id()).getAvailableBalance());
         Long ledgerCount = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM account_ledger WHERE biz_type = 'SETTLEMENT' AND biz_no = ?",
                 Long.class, order.getSettleNo());
@@ -177,15 +192,15 @@ class SettlementExecuteIntegrationTest extends IntegrationTestBase {
         assertEquals(0L, merchantAccounts);
 
         // 补足备付金后重试：FAILED → PROCESSING → SUCCESS
-        adjust(platform.getId(), SETTLE_AMOUNT * 2);
+        adjust(platform.id(), SETTLE_AMOUNT * 2);
         executeService.execute(order.getId());
         SettlementOrder retried = settlementOrderMapper.selectById(order.getId());
         assertEquals("SUCCESS", retried.getStatus());
 
-        Account merchant = accountService.getOrCreate(AccountOwnerType.MERCHANT, merchantId, "CNY");
-        assertEquals(SETTLE_AMOUNT, merchant.getAvailableBalance());
-        assertTrue(ledgerService.consistencyCheck(platform.getId()).consistent());
-        assertTrue(ledgerService.consistencyCheck(merchant.getId()).consistent());
+        AccountSnapshot merchant = accountService.getOrCreate(AccountOwnerType.MERCHANT, merchantId, "CNY");
+        assertEquals(SETTLE_AMOUNT, merchant.availableBalance());
+        assertTrue(ledgerService.consistencyCheck(platform.id()).consistent());
+        assertTrue(ledgerService.consistencyCheck(merchant.id()).consistent());
         // 重试只动了一次账
         Long retriedLedgerCount = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM account_ledger WHERE biz_type = 'SETTLEMENT' AND biz_no = ?",
@@ -196,8 +211,8 @@ class SettlementExecuteIntegrationTest extends IntegrationTestBase {
     @Test
     void repeatedExecuteIsRejectedAfterSuccess() {
         // 平台备付金共享账户：先垫足，保证本用例不受其他用例/历史运行影响
-        Account platform = platformAccount();
-        adjust(platform.getId(), 1_000_000L);
+        AccountSnapshot platform = platformAccount();
+        adjust(platform.id(), 1_000_000L);
         SettlementOrder order = generateApprovedOrder("it-admin");
         executeService.execute(order.getId());
         BusinessException error = assertThrows(BusinessException.class,
@@ -223,12 +238,44 @@ class SettlementExecuteIntegrationTest extends IntegrationTestBase {
         return order;
     }
 
-    private Account platformAccount() {
+    private AccountSnapshot platformAccount() {
         return accountService.getOrCreate(AccountOwnerType.PLATFORM, 0L, "CNY");
     }
 
     private void adjust(Long accountId, long amount) {
         ledgerService.adjust(accountId, amount, "S25 集成测试备付金调整");
+    }
+
+    /**
+     * 等待应用内账务消费者把已提交位点追到各分区末尾。
+     * 组内无提交位点视为无积压；超时仍未追平直接判失败，避免余额不足用例在噪声数据上误判。
+     */
+    private void awaitLedgerConsumerDrained() throws Exception {
+        try (AdminClient admin = AdminClient.create(
+                Map.of(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, BOOTSTRAP_SERVERS))) {
+            long deadline = System.currentTimeMillis() + EVENT_DRAIN_TIMEOUT_MS;
+            while (true) {
+                Map<TopicPartition, OffsetAndMetadata> committed = admin
+                        .listConsumerGroupOffsets(LEDGER_GROUP_ID)
+                        .partitionsToOffsetAndMetadata().get(5, TimeUnit.SECONDS);
+                if (committed.isEmpty()) {
+                    return;
+                }
+                Map<TopicPartition, OffsetSpec> latest = new HashMap<>();
+                committed.keySet().forEach(partition -> latest.put(partition, OffsetSpec.latest()));
+                var ends = admin.listOffsets(latest).all().get(5, TimeUnit.SECONDS);
+                boolean drained = committed.entrySet().stream()
+                        .allMatch(entry -> entry.getValue().offset() >= ends.get(entry.getKey()).offset());
+                if (drained) {
+                    return;
+                }
+                if (System.currentTimeMillis() > deadline) {
+                    throw new IllegalStateException("账务消费者积压未在 " + EVENT_DRAIN_TIMEOUT_MS
+                            + "ms 内追平，无法构造确定性的余额不足场景");
+                }
+                Thread.sleep(100);
+            }
+        }
     }
 
     private void insertClearing(long merchantIncome) {
@@ -243,7 +290,7 @@ class SettlementExecuteIntegrationTest extends IntegrationTestBase {
 
     private Properties consumerProps() {
         Properties props = new Properties();
-        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092");
+        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, BOOTSTRAP_SERVERS);
         props.put(ConsumerConfig.GROUP_ID_CONFIG, "it-settle-" + UUID.randomUUID());
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());

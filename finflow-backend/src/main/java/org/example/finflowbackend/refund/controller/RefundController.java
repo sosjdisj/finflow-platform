@@ -2,7 +2,7 @@ package org.example.finflowbackend.refund.controller;
 
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
-import org.example.finflowbackend.auth.web.CurrentUserHolder;
+import org.example.finflowbackend.common.context.CurrentUserHolder;
 import org.example.finflowbackend.common.api.ApiResponse;
 import org.example.finflowbackend.common.api.PageResponse;
 import org.example.finflowbackend.common.idempotent.Idempotent;

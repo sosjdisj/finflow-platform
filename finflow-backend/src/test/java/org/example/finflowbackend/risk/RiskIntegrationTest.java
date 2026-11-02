@@ -2,11 +2,12 @@ package org.example.finflowbackend.risk;
 
 import org.example.finflowbackend.common.exception.BusinessException;
 import org.example.finflowbackend.payment.PaymentErrorCode;
-import org.example.finflowbackend.payment.dto.PaymentOrderCreateRequest;
-import org.example.finflowbackend.payment.dto.PaymentOrderResponse;
+import org.example.finflowbackend.payment.api.PaymentOrderCreateRequest;
+import org.example.finflowbackend.payment.api.PaymentOrderResponse;
 import org.example.finflowbackend.payment.service.PaymentProcessService;
 import org.example.finflowbackend.risk.entity.RiskBlacklist;
 import org.example.finflowbackend.risk.entity.RiskRule;
+import org.example.finflowbackend.risk.evaluate.FrequencyEvaluator;
 import org.example.finflowbackend.risk.service.RiskBlacklistService;
 import org.example.finflowbackend.risk.service.RiskReviewService;
 import org.example.finflowbackend.risk.service.RiskRuleService;
@@ -55,15 +56,17 @@ class RiskIntegrationTest extends IntegrationTestBase {
     @BeforeEach
     void setUp() {
         // 清理历史运行残留（含异常中断留下的规则），保证求值器只看到本用例的配置
-        jdbcTemplate.update("DELETE FROM risk_rule WHERE rule_name LIKE ?", RULE_PREFIX + "%");
+        jdbcTemplate.update("DELETE FROM finflow_risk.risk_rule WHERE rule_name LIKE ?", RULE_PREFIX + "%");
         merchantId = createMerchant();
+        // 商家 ID 自增从 1 开始，跨轮会复用；窗口计数键不清会让首笔就命中频次规则
+        redisTemplate.delete(FrequencyEvaluator.KEY_PREFIX + merchantId);
     }
 
     @AfterEach
     void tearDown() {
-        ruleIds.forEach(id -> jdbcTemplate.update("DELETE FROM risk_rule WHERE id = ?", id));
-        jdbcTemplate.update("DELETE FROM risk_rule WHERE rule_name LIKE ?", RULE_PREFIX + "%");
-        blacklistIds.forEach(id -> jdbcTemplate.update("DELETE FROM risk_blacklist WHERE id = ?", id));
+        ruleIds.forEach(id -> jdbcTemplate.update("DELETE FROM finflow_risk.risk_rule WHERE id = ?", id));
+        jdbcTemplate.update("DELETE FROM finflow_risk.risk_rule WHERE rule_name LIKE ?", RULE_PREFIX + "%");
+        blacklistIds.forEach(id -> jdbcTemplate.update("DELETE FROM finflow_risk.risk_blacklist WHERE id = ?", id));
     }
 
     @Test
@@ -232,7 +235,7 @@ class RiskIntegrationTest extends IntegrationTestBase {
 
     private Map<String, Object> riskEvent(Long orderId) {
         return jdbcTemplate.queryForMap(
-                "SELECT verdict, total_score, hit_rules FROM risk_event WHERE order_id = ? ORDER BY id DESC LIMIT 1",
+                "SELECT verdict, total_score, hit_rules FROM finflow_risk.risk_event WHERE order_id = ? ORDER BY id DESC LIMIT 1",
                 orderId);
     }
 

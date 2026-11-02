@@ -15,7 +15,7 @@ import java.time.LocalDateTime;
  */
 @Getter
 @Setter
-@TableName("webhook_event")
+@TableName(value = "webhook_event", schema = "finflow_notify")
 public class WebhookEvent {
 
     public static final String STATUS_PENDING = "PENDING";

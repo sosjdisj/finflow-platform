@@ -1,6 +1,6 @@
 package org.example.finflowbackend.payment.dto;
 
-import org.example.finflowbackend.payment.entity.PaymentTransaction;
+import org.example.finflowbackend.channel.api.PaymentTransactionSnapshot;
 
 import java.time.LocalDateTime;
 
@@ -11,8 +11,8 @@ public record PaymentTransactionResponse(Long id, Long orderId, String channelCo
                                          String channelOrderNo, String requestPayload, String responsePayload,
                                          LocalDateTime createdAt) {
 
-    public static PaymentTransactionResponse from(PaymentTransaction txn) {
-        return new PaymentTransactionResponse(txn.getId(), txn.getOrderId(), txn.getChannelCode(), txn.getTxnType(),
-                txn.getChannelOrderNo(), txn.getRequestPayload(), txn.getResponsePayload(), txn.getCreatedAt());
+    public static PaymentTransactionResponse from(PaymentTransactionSnapshot txn) {
+        return new PaymentTransactionResponse(txn.id(), txn.orderId(), txn.channelCode(), txn.txnType(),
+                txn.channelOrderNo(), txn.requestPayload(), txn.responsePayload(), txn.createdAt());
     }
 }

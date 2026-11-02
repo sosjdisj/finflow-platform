@@ -4,7 +4,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.example.finflowbackend.common.api.ApiResponse;
 import org.example.finflowbackend.system.dto.MenuCreateRequest;
-import org.example.finflowbackend.system.dto.MenuTreeNode;
+import org.example.finflowbackend.system.api.MenuTreeNode;
 import org.example.finflowbackend.system.dto.MenuUpdateRequest;
 import org.example.finflowbackend.system.service.MenuService;
 import org.springframework.security.access.prepost.PreAuthorize;

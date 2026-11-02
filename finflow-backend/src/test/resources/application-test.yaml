@@ -2,3 +2,10 @@
 spring:
   autoconfigure:
     exclude: org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration
+  cloud:
+    # M08：单测不起注册中心与 Sentinel，避免测试期向 Nacos 注册、占用 Sentinel 传输端口
+    nacos:
+      discovery:
+        enabled: false
+    sentinel:
+      enabled: false

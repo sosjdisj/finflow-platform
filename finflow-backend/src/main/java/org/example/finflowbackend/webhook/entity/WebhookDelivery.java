@@ -13,7 +13,7 @@ import java.time.LocalDateTime;
  */
 @Getter
 @Setter
-@TableName("webhook_delivery")
+@TableName(value = "webhook_delivery", schema = "finflow_notify")
 public class WebhookDelivery {
 
     @TableId(type = IdType.AUTO)

@@ -1,9 +1,9 @@
 package org.example.finflowbackend.settlement.service;
 
-import org.example.finflowbackend.account.AccountOwnerType;
-import org.example.finflowbackend.account.entity.Account;
-import org.example.finflowbackend.account.service.AccountService;
-import org.example.finflowbackend.ledger.service.LedgerService;
+import org.example.finflowbackend.account.api.AccountApi;
+import org.example.finflowbackend.account.api.AccountOwnerType;
+import org.example.finflowbackend.account.api.AccountSnapshot;
+import org.example.finflowbackend.ledger.api.LedgerApi;
 import org.example.finflowbackend.settlement.SettlementStatus;
 import org.example.finflowbackend.settlement.entity.SettlementOrder;
 import org.springframework.stereotype.Component;
@@ -23,28 +23,28 @@ public class SettlementPostingService {
     /** 平台备付金账户 ownerId 约定为 0（与账务消费者一致）。 */
     private static final long PLATFORM_OWNER_ID = 0L;
 
-    private final AccountService accountService;
-    private final LedgerService ledgerService;
+    private final AccountApi accountApi;
+    private final LedgerApi ledgerApi;
     private final SettlementStatusService statusService;
 
-    public SettlementPostingService(AccountService accountService,
-                                    LedgerService ledgerService,
+    public SettlementPostingService(AccountApi accountApi,
+                                    LedgerApi ledgerApi,
                                     SettlementStatusService statusService) {
-        this.accountService = accountService;
-        this.ledgerService = ledgerService;
+        this.accountApi = accountApi;
+        this.ledgerApi = ledgerApi;
         this.statusService = statusService;
     }
 
     /** 执行打款：备付金 −应付额，商户账户 +应付额，全部成功后单子推 SUCCESS。 */
     @Transactional
     public void post(SettlementOrder order) {
-        Account platform = accountService.getOrCreate(
+        AccountSnapshot platform = accountApi.getOrCreate(
                 AccountOwnerType.PLATFORM, PLATFORM_OWNER_ID, order.getCurrency());
-        ledgerService.debit(platform.getId(), "SETTLEMENT", order.getSettleNo(), order.getTotalAmount(),
+        ledgerApi.debit(platform.id(), "SETTLEMENT", order.getSettleNo(), order.getTotalAmount(),
                 "CONSOLE", "结算出账: " + order.getSettleNo());
-        Account merchant = accountService.getOrCreate(
+        AccountSnapshot merchant = accountApi.getOrCreate(
                 AccountOwnerType.MERCHANT, order.getMerchantId(), order.getCurrency());
-        ledgerService.credit(merchant.getId(), "SETTLEMENT", order.getSettleNo(), order.getTotalAmount(),
+        ledgerApi.credit(merchant.id(), "SETTLEMENT", order.getSettleNo(), order.getTotalAmount(),
                 "CONSOLE", "结算入账: " + order.getSettleNo());
         statusService.transition(order.getId(), SettlementStatus.SUCCESS, "执行完成", "SYSTEM");
     }

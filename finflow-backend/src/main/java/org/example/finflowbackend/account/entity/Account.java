@@ -21,7 +21,7 @@ public class Account {
     @TableId(type = IdType.AUTO)
     private Long id;
 
-    /** 主体类型，取值见 {@link org.example.finflowbackend.account.AccountOwnerType}。 */
+    /** 主体类型，取值见 {@link org.example.finflowbackend.account.api.AccountOwnerType}。 */
     private String ownerType;
 
     /** 主体ID（平台账户固定为 0）。 */

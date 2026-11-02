@@ -1,15 +1,14 @@
 package org.example.finflowbackend.reconciliation;
 
+import org.example.finflowbackend.channel.api.ChannelConfigApi;
 import org.example.finflowbackend.common.exception.BusinessException;
-import org.example.finflowbackend.payment.service.ChannelConfigService;
 import org.example.finflowbackend.reconciliation.entity.ReconciliationTask;
 import org.example.finflowbackend.reconciliation.mapper.ReconciliationTaskMapper;
 import org.example.finflowbackend.reconciliation.service.ReconciliationBillStore;
 import org.example.finflowbackend.reconciliation.service.ReconciliationTaskService;
-import org.example.finflowbackend.system.file.FileBizType;
-import org.example.finflowbackend.system.file.FileObjectResponse;
-import org.example.finflowbackend.system.file.FileObjectService;
-import org.example.finflowbackend.system.file.FileStorage;
+import org.example.finflowbackend.system.api.file.FileBizType;
+import org.example.finflowbackend.system.api.file.FileObjectApi;
+import org.example.finflowbackend.system.api.file.FileObjectResponse;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.mock.web.MockMultipartFile;
@@ -42,20 +41,18 @@ class ReconciliationTaskServiceTest {
 
     private final ReconciliationTaskMapper taskMapper = mock(ReconciliationTaskMapper.class);
     private final ReconciliationBillStore billStore = mock(ReconciliationBillStore.class);
-    private final ChannelConfigService channelConfigService = mock(ChannelConfigService.class);
-    private final FileObjectService fileObjectService = mock(FileObjectService.class);
-    private final FileStorage fileStorage = mock(FileStorage.class);
+    private final ChannelConfigApi channelConfigApi = mock(ChannelConfigApi.class);
+    private final FileObjectApi fileObjectApi = mock(FileObjectApi.class);
 
     private ReconciliationTaskService newService() {
-        return new ReconciliationTaskService(taskMapper, billStore, channelConfigService,
-                fileObjectService, fileStorage);
+        return new ReconciliationTaskService(taskMapper, billStore, channelConfigApi, fileObjectApi);
     }
 
     private void stubFileCenter() {
-        when(fileObjectService.upload(any(), eq(FileBizType.RECONCILIATION.name()), isNull(), eq(9L)))
+        when(fileObjectApi.upload(any(), eq(FileBizType.RECONCILIATION.name()), isNull(), eq(9L)))
                 .thenReturn(new FileObjectResponse(1L, OBJECT_KEY, "bill.csv", "text/csv",
                         1L, "RECONCILIATION", null, 9L, null));
-        when(fileStorage.get(OBJECT_KEY))
+        when(fileObjectApi.openByObjectKey(OBJECT_KEY))
                 .thenReturn(new ByteArrayInputStream("x".getBytes(StandardCharsets.UTF_8)));
     }
 
@@ -70,7 +67,7 @@ class ReconciliationTaskServiceTest {
                 () -> newService().upload("MOCK_WALLET", LocalDate.of(2026, 10, 17),
                         new MockMultipartFile("file", "bill.csv", "text/csv", new byte[0]), "admin", 9L));
         assertEquals(ReconciliationErrorCode.BILL_FILE_INVALID, error.getErrorCode());
-        verify(fileObjectService, never()).upload(any(), anyString(), any(), anyLong());
+        verify(fileObjectApi, never()).upload(any(), anyString(), any(), anyLong());
     }
 
     @Test
@@ -83,7 +80,7 @@ class ReconciliationTaskServiceTest {
 
     @Test
     void uploadRejectsDisabledChannel() {
-        when(channelConfigService.existsEnabled("MOCK_WALLET")).thenReturn(false);
+        when(channelConfigApi.existsEnabled("MOCK_WALLET")).thenReturn(false);
         BusinessException error = assertThrows(BusinessException.class,
                 () -> newService().upload("MOCK_WALLET", LocalDate.of(2026, 10, 17),
                         csv("x"), "admin", 9L));
@@ -92,7 +89,7 @@ class ReconciliationTaskServiceTest {
 
     @Test
     void uploadRejectsDuplicatedChannelBillDate() {
-        when(channelConfigService.existsEnabled(anyString())).thenReturn(true);
+        when(channelConfigApi.existsEnabled(anyString())).thenReturn(true);
         when(taskMapper.selectCount(any())).thenReturn(1L);
         BusinessException error = assertThrows(BusinessException.class,
                 () -> newService().upload("MOCK_WALLET", LocalDate.of(2026, 10, 17),
@@ -102,7 +99,7 @@ class ReconciliationTaskServiceTest {
 
     @Test
     void uploadCreatesPendingTaskThenDelegatesToStore() {
-        when(channelConfigService.existsEnabled(anyString())).thenReturn(true);
+        when(channelConfigApi.existsEnabled(anyString())).thenReturn(true);
         when(taskMapper.selectCount(any())).thenReturn(0L);
         stubFileCenter();
 
@@ -116,7 +113,7 @@ class ReconciliationTaskServiceTest {
         assertEquals("admin", inserted.getUploadedBy());
         // S38：file_path 存 objectKey，并已登记文件元数据
         assertEquals(OBJECT_KEY, inserted.getFilePath());
-        verify(fileObjectService).upload(any(), eq(FileBizType.RECONCILIATION.name()), isNull(), eq(9L));
+        verify(fileObjectApi).upload(any(), eq(FileBizType.RECONCILIATION.name()), isNull(), eq(9L));
         // 任务号 R+日期+6位随机
         assertEquals("R20261017", result.getTaskNo().substring(0, 9));
         verify(billStore).parseAndStore(eq(inserted), any(Reader.class));
@@ -124,7 +121,7 @@ class ReconciliationTaskServiceTest {
 
     @Test
     void uploadMarksFailedAndRethrowsWhenParseFails() {
-        when(channelConfigService.existsEnabled(anyString())).thenReturn(true);
+        when(channelConfigApi.existsEnabled(anyString())).thenReturn(true);
         when(taskMapper.selectCount(any())).thenReturn(0L);
         stubFileCenter();
         doThrow(new BusinessException(ReconciliationErrorCode.BILL_ROW_INVALID, "第 1 行列数非法"))
@@ -151,7 +148,7 @@ class ReconciliationTaskServiceTest {
 
     @Test
     void uploadTaskNoUniqueAfterRetry() {
-        when(channelConfigService.existsEnabled(anyString())).thenReturn(true);
+        when(channelConfigApi.existsEnabled(anyString())).thenReturn(true);
         when(taskMapper.selectCount(any())).thenReturn(0L, 1L, 0L);
         stubFileCenter();
 

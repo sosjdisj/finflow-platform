@@ -1,6 +1,6 @@
 package org.example.finflowbackend.system.service.impl;
 
-import org.example.finflowbackend.system.config.ConfigKeys;
+import org.example.finflowbackend.system.api.ConfigKeys;
 import org.example.finflowbackend.system.entity.SystemConfig;
 import org.example.finflowbackend.system.mapper.SystemConfigMapper;
 import org.junit.jupiter.api.BeforeEach;

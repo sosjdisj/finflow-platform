@@ -1,8 +1,13 @@
 package org.example.finflowbackend.payment.event;
 
-import org.example.finflowbackend.common.event.DomainEvent;
 import org.example.finflowbackend.common.event.DomainEventPublisher;
-import org.example.finflowbackend.payment.PaymentStatus;
+import org.example.finflowbackend.contract.DomainEvent;
+import org.example.finflowbackend.contract.EventTopics;
+import org.example.finflowbackend.contract.EventTypes;
+import org.example.finflowbackend.contract.PaymentCreatedPayload;
+import org.example.finflowbackend.contract.PaymentFailedPayload;
+import org.example.finflowbackend.contract.PaymentSucceededPayload;
+import org.example.finflowbackend.payment.api.PaymentStatus;
 import org.example.finflowbackend.payment.entity.PaymentOrder;
 import org.springframework.stereotype.Component;
 
@@ -22,24 +27,25 @@ public class PaymentEventPublisher {
     /** 状态推进成功后调用：按目标状态 toStatus 发布 Created/Succeeded/Failed 事件，其余状态不发。 */
     public void publishFor(PaymentOrder order, String toStatus, String reason) {
         switch (toStatus) {
-            case "PENDING" -> eventPublisher.publish(PaymentTopics.TOPIC_CREATED,
-                    String.valueOf(order.getId()), DomainEvent.of(PaymentTopics.TYPE_CREATED,
+            case "PENDING" -> eventPublisher.publish(EventTopics.PAYMENT_CREATED,
+                    String.valueOf(order.getId()), DomainEvent.of(EventTypes.PAYMENT_CREATED,
                             new PaymentCreatedPayload(order.getId(), order.getPlatformOrderNo(),
                                     order.getMerchantId(), order.getMerchantOrderNo(),
                                     order.getAmount(), order.getPaymentMethod())));
             case "PAID" -> {
                 // 仅支付成功（PROCESSING→PAID）发 Succeeded；退款失败回退 REFUNDING→PAID 不重发（S21）
                 if (PaymentStatus.PROCESSING.name().equals(order.getStatus())) {
-                    eventPublisher.publish(PaymentTopics.TOPIC_SUCCEEDED,
-                            String.valueOf(order.getId()), DomainEvent.of(PaymentTopics.TYPE_SUCCEEDED,
-                                    new PaymentSucceededPayload(order.getId(), order.getPlatformOrderNo(),
-                                            order.getAmount(), order.getCurrency(), order.getUpdatedAt())));
+                    eventPublisher.publish(EventTopics.PAYMENT_SUCCEEDED,
+                            String.valueOf(order.getId()), DomainEvent.of(EventTypes.PAYMENT_SUCCEEDED,
+                                    new PaymentSucceededPayload(order.getId(), order.getMerchantId(),
+                                            order.getPlatformOrderNo(), order.getAmount(), order.getCurrency(),
+                                            order.getUpdatedAt())));
                 }
             }
-            case "FAILED", "CLOSED" -> eventPublisher.publish(PaymentTopics.TOPIC_FAILED,
-                    String.valueOf(order.getId()), DomainEvent.of(PaymentTopics.TYPE_FAILED,
-                            new PaymentFailedPayload(order.getId(), order.getPlatformOrderNo(),
-                                    order.getAmount(), reason, order.getUpdatedAt())));
+            case "FAILED", "CLOSED" -> eventPublisher.publish(EventTopics.PAYMENT_FAILED,
+                    String.valueOf(order.getId()), DomainEvent.of(EventTypes.PAYMENT_FAILED,
+                            new PaymentFailedPayload(order.getId(), order.getMerchantId(),
+                                    order.getPlatformOrderNo(), order.getAmount(), reason, order.getUpdatedAt())));
             default -> {
                 // PROCESSING/SETTLED/REFUNDING/REFUNDED 事件由退款、结算阶段各自补充
             }

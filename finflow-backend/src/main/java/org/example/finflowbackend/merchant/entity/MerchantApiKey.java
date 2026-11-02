@@ -30,6 +30,9 @@ public class MerchantApiKey {
     /** Secret 密文（AES-256-GCM，v1:iv:cipher 格式），历史凭证可能为空。 */
     private String secretCipher;
 
+    /** 是否启用（M12）：停用后 OpenAPI 验签直接拒绝，凭证与历史记录保留。 */
+    private Boolean enabled;
+
     /** IP/CIDR 白名单，逗号分隔。 */
     private String ipWhitelist;
 

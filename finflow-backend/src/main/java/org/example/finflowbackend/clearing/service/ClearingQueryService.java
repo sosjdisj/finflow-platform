@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.example.finflowbackend.clearing.ClearingErrorCode;
+import org.example.finflowbackend.clearing.api.ClearingOrderSnapshot;
+import org.example.finflowbackend.clearing.api.ClearingQueryApi;
 import org.example.finflowbackend.clearing.dto.ClearingDetailResponse;
 import org.example.finflowbackend.clearing.dto.ClearingOrderDetailResponse;
 import org.example.finflowbackend.clearing.dto.ClearingOrderResponse;
@@ -21,9 +23,10 @@ import java.util.List;
 
 /**
  * 清分单查询：列表分页与详情（分账明细）。供 S26 清分记录页使用。
+ * 跨模块（结算）只经 {@link ClearingQueryApi} 读取已清分记录快照。
  */
 @Service
-public class ClearingQueryService {
+public class ClearingQueryService implements ClearingQueryApi {
 
     private final ClearingOrderMapper clearingOrderMapper;
     private final ClearingDetailMapper clearingDetailMapper;
@@ -59,5 +62,14 @@ public class ClearingQueryService {
                                 .eq(ClearingDetail::getClearingId, id).orderByAsc(ClearingDetail::getId))
                 .stream().map(ClearingDetailResponse::from).toList();
         return new ClearingOrderDetailResponse(ClearingOrderResponse.from(order), details);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<ClearingOrderSnapshot> listClearedBySettleDate(LocalDate settleDate) {
+        return clearingOrderMapper.selectList(Wrappers.<ClearingOrder>query()
+                        .eq("settle_date", settleDate)
+                        .eq("status", "CLEARED"))
+                .stream().map(ClearingOrderSnapshot::from).toList();
     }
 }

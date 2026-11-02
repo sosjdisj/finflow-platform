@@ -7,6 +7,7 @@ import org.example.finflowbackend.webhook.mapper.WebhookEventMapper;
 import org.example.finflowbackend.webhook.service.WebhookDeliveryService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -18,8 +19,10 @@ import java.util.List;
  * Webhook 重试任务（S32）：每分钟扫描到期待重试事件（status=PENDING 且 next_retry_at<=now），
  * 逐笔重投。指数退避间隔由 WebhookRetryPolicy 计算，最大重试次数读配置。
  * 多实例安全由 Redis 锁保证（沿结算任务写法）；单笔失败不中断整批。
+ * M16：随通知进程独立部署（finflow.notify.worker=true 时装配）。
  */
 @Component
+@ConditionalOnProperty(name = "finflow.notify.worker", havingValue = "true", matchIfMissing = true)
 public class WebhookRetryTask {
 
     private static final Logger log = LoggerFactory.getLogger(WebhookRetryTask.class);

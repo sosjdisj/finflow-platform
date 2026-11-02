@@ -30,7 +30,31 @@
 		<java.version>25</java.version>
 		<mybatis-plus.version>3.5.17</mybatis-plus.version>
 		<jjwt.version>0.12.6</jjwt.version>
+		<archunit.version>1.5.1</archunit.version>
+		<!-- M08 版本矩阵沿用 M01：SC 2025.1.4（Boot 4.1.x 官方支持）+ SCA 2025.1.0.0（同 train） -->
+		<spring-cloud.version>2025.1.4</spring-cloud.version>
+		<spring-cloud-alibaba.version>2025.1.0.0</spring-cloud-alibaba.version>
 	</properties>
+
+	<!-- 与 finflow-gateway 同一套矩阵；BOM 顺序有意义：先 SC 后 SCA，SC patch 覆盖 SCA 传递引入的 2025.1.0 -->
+	<dependencyManagement>
+		<dependencies>
+			<dependency>
+				<groupId>org.springframework.cloud</groupId>
+				<artifactId>spring-cloud-dependencies</artifactId>
+				<version>${spring-cloud.version}</version>
+				<type>pom</type>
+				<scope>import</scope>
+			</dependency>
+			<dependency>
+				<groupId>com.alibaba.cloud</groupId>
+				<artifactId>spring-cloud-alibaba-dependencies</artifactId>
+				<version>${spring-cloud-alibaba.version}</version>
+				<type>pom</type>
+				<scope>import</scope>
+			</dependency>
+		</dependencies>
+	</dependencyManagement>
 	<dependencies>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
@@ -155,6 +179,46 @@
 			<artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
 			<version>3.1.1</version>
 		</dependency>
+		<!-- M08 渠道服务独立进程：backend 侧 Feign + LoadBalancer 调渠道服务（mode=remote 时生效） -->
+		<dependency>
+			<groupId>org.springframework.cloud</groupId>
+			<artifactId>spring-cloud-starter-openfeign</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.cloud</groupId>
+			<artifactId>spring-cloud-starter-loadbalancer</artifactId>
+		</dependency>
+		<!-- M08 注册与发现：backend、渠道服务都以 Nacos 为注册中心 -->
+		<dependency>
+			<groupId>com.alibaba.cloud</groupId>
+			<artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+		</dependency>
+		<!-- M14 配置中心：运行时阈值（风控 / 限流 / 渠道参数）从 Nacos Config 读取并支持热刷新 -->
+		<dependency>
+			<groupId>com.alibaba.cloud</groupId>
+			<artifactId>spring-cloud-starter-alibaba-nacos-config</artifactId>
+		</dependency>
+		<!-- M08 流控 / 熔断 / 降级：Feign 调用渠道服务时由 Sentinel 包裹（feign.sentinel.enabled=true） -->
+		<dependency>
+			<groupId>com.alibaba.cloud</groupId>
+			<artifactId>spring-cloud-starter-alibaba-sentinel</artifactId>
+		</dependency>
+		<!-- M15 链路追踪：Micrometer Tracing + OTel Bridge（W3C traceparent）。
+		     不引 starter-opentelemetry，避免带上 OTLP 指标/日志 exporter（本机无 collector） -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-micrometer-tracing-opentelemetry</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>io.micrometer</groupId>
+			<artifactId>micrometer-tracing-bridge-otel</artifactId>
+			<scope>runtime</scope>
+		</dependency>
+		<!-- M15 Feign 出口：MicrometerObservationCapability 自动把 traceparent 注入下游请求头 -->
+		<dependency>
+			<groupId>io.github.openfeign</groupId>
+			<artifactId>feign-micrometer</artifactId>
+		</dependency>
 
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
@@ -178,6 +242,13 @@
 			<artifactId>testcontainers-mysql</artifactId>
 			<scope>test</scope>
 		</dependency>
+		<!-- M02 依赖体检：ArchUnit 静态架构规则（FreezingArchRule 冻结存量违规，保证构建仍绿） -->
+		<dependency>
+			<groupId>com.tngtech.archunit</groupId>
+			<artifactId>archunit-junit5</artifactId>
+			<version>${archunit.version}</version>
+			<scope>test</scope>
+		</dependency>
 	</dependencies>
 
 	<build>
@@ -185,6 +256,56 @@
 			<plugin>
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
+				<!-- 同源双进程：默认 repackage（主 jar）显式指定 backend 启动类，避免两个 @SpringBootApplication 冲突 -->
+				<configuration>
+					<mainClass>org.example.finflowbackend.FinflowBackendApplication</mainClass>
+				</configuration>
+				<executions>
+					<!-- M08 同源双进程：同一份源码额外产出渠道服务可执行 jar（classifier=channel） -->
+					<execution>
+						<id>repackage-channel-service</id>
+						<goals>
+							<goal>repackage</goal>
+						</goals>
+						<configuration>
+							<classifier>channel</classifier>
+							<mainClass>org.example.finflowchannel.ChannelServiceApplication</mainClass>
+						</configuration>
+					</execution>
+					<!-- M11 同源双进程：额外产出风控服务可执行 jar（classifier=risk） -->
+					<execution>
+						<id>repackage-risk-service</id>
+						<goals>
+							<goal>repackage</goal>
+						</goals>
+						<configuration>
+							<classifier>risk</classifier>
+							<mainClass>org.example.finflowrisk.RiskServiceApplication</mainClass>
+						</configuration>
+					</execution>
+					<!-- M16 同源双进程：额外产出通知服务可执行 jar（classifier=notify） -->
+					<execution>
+						<id>repackage-notify-service</id>
+						<goals>
+							<goal>repackage</goal>
+						</goals>
+						<configuration>
+							<classifier>notify</classifier>
+							<mainClass>org.example.finflownotify.NotifyServiceApplication</mainClass>
+						</configuration>
+					</execution>
+					<!-- M17 同源双进程：额外产出批处理服务可执行 jar（classifier=batch） -->
+					<execution>
+						<id>repackage-batch-service</id>
+						<goals>
+							<goal>repackage</goal>
+						</goals>
+						<configuration>
+							<classifier>batch</classifier>
+							<mainClass>org.example.finflowbatch.BatchServiceApplication</mainClass>
+						</configuration>
+					</execution>
+				</executions>
 			</plugin>
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>

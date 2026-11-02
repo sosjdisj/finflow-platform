@@ -1,6 +1,6 @@
 package org.example.finflowbackend.clearing.service;
 
-import org.example.finflowbackend.merchant.dto.ClearingFeeRateView;
+import org.example.finflowbackend.merchant.api.ClearingFeeRateView;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;

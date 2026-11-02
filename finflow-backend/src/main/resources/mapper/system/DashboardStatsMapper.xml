@@ -33,9 +33,10 @@
         WHERE settle_date = CURDATE()
     </select>
 
+    <!-- 风控事件在独立库 finflow_risk（M10/V36），报表只读按 schema 限定访问 -->
     <select id="selectTodayRiskRejectCount" resultType="long">
         SELECT COUNT(*)
-        FROM risk_event
+        FROM finflow_risk.risk_event
         WHERE verdict = 'REJECT' AND DATE(created_at) = CURDATE()
     </select>
 

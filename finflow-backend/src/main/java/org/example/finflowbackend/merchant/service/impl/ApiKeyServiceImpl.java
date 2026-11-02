@@ -5,10 +5,12 @@ import org.example.finflowbackend.common.exception.BusinessException;
 import org.example.finflowbackend.common.util.AesCipher;
 import org.example.finflowbackend.common.util.HmacSigner;
 import org.example.finflowbackend.merchant.MerchantErrorCode;
+import org.example.finflowbackend.merchant.api.OpenApiCredential;
 import org.example.finflowbackend.merchant.dto.ApiKeyCreateResponse;
 import org.example.finflowbackend.merchant.dto.IpWhitelistUpdateRequest;
 import org.example.finflowbackend.merchant.dto.MerchantApiKeyResponse;
 import org.example.finflowbackend.merchant.entity.MerchantApiKey;
+import org.example.finflowbackend.merchant.event.MerchantNotifyConfigPublisher;
 import org.example.finflowbackend.merchant.mapper.MerchantApiKeyMapper;
 import org.example.finflowbackend.merchant.service.ApiKeyService;
 import org.example.finflowbackend.merchant.service.MerchantService;
@@ -31,13 +33,16 @@ public class ApiKeyServiceImpl implements ApiKeyService {
 
     private final MerchantApiKeyMapper apiKeyMapper;
     private final MerchantService merchantService;
+    private final MerchantNotifyConfigPublisher notifyConfigPublisher;
     private final String secretEncryptKey;
 
     public ApiKeyServiceImpl(MerchantApiKeyMapper apiKeyMapper,
                              MerchantService merchantService,
+                             MerchantNotifyConfigPublisher notifyConfigPublisher,
                              @Value("${finflow.security.secret-encrypt-key}") String secretEncryptKey) {
         this.apiKeyMapper = apiKeyMapper;
         this.merchantService = merchantService;
+        this.notifyConfigPublisher = notifyConfigPublisher;
         this.secretEncryptKey = secretEncryptKey;
     }
 
@@ -50,7 +55,10 @@ public class ApiKeyServiceImpl implements ApiKeyService {
         apiKey.setApiKey("fk_" + randomHex(16));
         apiKey.setSecretHash(HmacSigner.sha256Hex(secret));
         apiKey.setSecretCipher(AesCipher.encrypt(secret, secretEncryptKey));
+        apiKey.setEnabled(Boolean.TRUE);
         apiKeyMapper.insert(apiKey);
+        // M16：新凭证含最新签名密钥密文，重新投影给通知服务（Webhook 投递签名用）
+        notifyConfigPublisher.publish(merchantId);
         return new ApiKeyCreateResponse(apiKey.getId(), merchantId, apiKey.getApiKey(), secret, apiKey.getCreatedAt());
     }
 
@@ -92,6 +100,23 @@ public class ApiKeyServiceImpl implements ApiKeyService {
             return Optional.empty();
         }
         return Optional.of(AesCipher.decrypt(latest.getSecretCipher(), secretEncryptKey));
+    }
+
+    @Override
+    public Optional<OpenApiCredential> findCredential(String apiKey) {
+        if (apiKey == null || apiKey.isBlank()) {
+            return Optional.empty();
+        }
+        MerchantApiKey credential = apiKeyMapper.selectOne(Wrappers.<MerchantApiKey>query()
+                .eq("api_key", apiKey));
+        // 停用（enabled=0）与无密文的历史凭证都不能参与验签；null 视为启用，兼容存量行
+        if (credential == null || Boolean.FALSE.equals(credential.getEnabled())
+                || credential.getSecretCipher() == null) {
+            return Optional.empty();
+        }
+        String secret = AesCipher.decrypt(credential.getSecretCipher(), secretEncryptKey);
+        return Optional.of(new OpenApiCredential(credential.getMerchantId(), credential.getApiKey(),
+                secret, credential.getIpWhitelist()));
     }
 
     private String randomHex(int bytes) {

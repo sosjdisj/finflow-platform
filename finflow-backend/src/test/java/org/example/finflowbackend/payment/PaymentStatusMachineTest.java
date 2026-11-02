@@ -1,6 +1,7 @@
 package org.example.finflowbackend.payment;
 
 import org.example.finflowbackend.common.exception.BusinessException;
+import org.example.finflowbackend.payment.api.PaymentStatus;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;

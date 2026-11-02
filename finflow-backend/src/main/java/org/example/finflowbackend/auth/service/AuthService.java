@@ -1,20 +1,21 @@
 package org.example.finflowbackend.auth.service;
 
+import org.example.finflowbackend.auth.api.AuthApi;
+import org.example.finflowbackend.auth.api.UserInfoResponse;
 import org.example.finflowbackend.auth.dto.ChangePasswordRequest;
 import org.example.finflowbackend.auth.dto.LoginLogResponse;
 import org.example.finflowbackend.auth.dto.LoginRequest;
 import org.example.finflowbackend.auth.dto.RegisterRequest;
 import org.example.finflowbackend.auth.dto.SessionResponse;
 import org.example.finflowbackend.auth.dto.TokenResponse;
-import org.example.finflowbackend.auth.dto.UserInfoResponse;
 import org.example.finflowbackend.common.api.PageResponse;
 
 import java.util.List;
 
 /**
- * 认证服务：auth 模块对外暴露的接口，其他模块只能通过它取用户信息。
+ * 认证服务：模块内部接口，其他模块只经 {@link AuthApi} 取用户信息。
  */
-public interface AuthService {
+public interface AuthService extends AuthApi {
 
     /** 注册：用户名唯一，密码 BCrypt 加密存储。 */
     UserInfoResponse register(RegisterRequest request);
@@ -33,9 +34,6 @@ public interface AuthService {
 
     /** 修改密码：校验原密码，成功后吊销该用户全部 refresh token。 */
     void changePassword(Long userId, ChangePasswordRequest request);
-
-    /** 获取用户信息（不含密码字段）。 */
-    UserInfoResponse getUserInfo(Long userId);
 
     /** 当前登录设备列表：活跃 refresh token，id 即踢下线用的会话 ID。 */
     List<SessionResponse> listSessions(Long userId);

@@ -2,7 +2,7 @@ package org.example.finflowbackend.payment.task;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.example.finflowbackend.common.exception.BusinessException;
-import org.example.finflowbackend.payment.PaymentStatus;
+import org.example.finflowbackend.payment.api.PaymentStatus;
 import org.example.finflowbackend.payment.entity.PaymentOrder;
 import org.example.finflowbackend.payment.mapper.PaymentOrderMapper;
 import org.example.finflowbackend.payment.service.PaymentOrderService;

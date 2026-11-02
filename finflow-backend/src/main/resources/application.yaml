@@ -4,9 +4,49 @@ spring:
   # 本地默认 dev；生产以 --spring.profiles.active=prod 启动
   profiles:
     default: dev
+  # M14 配置中心的 import 声明不能放这里：非 profile 文档的 import 在 profile 生效前解析，
+  # 此时 spring.cloud.nacos.config.enabled 还是下面的默认值 false，nacos: 位置会被当成文件跳过。
+  # 因此 import 写在 prod / channel / risk 各自 profile 文件内。
   flyway:
     enabled: true
-    locations: classpath:db/migration
+    # 按模块分目录：db/migration 为主库，db/channel 为渠道库 finflow_channel（M07），
+    # db/risk 为风控库 finflow_risk（M10），db/notify 为通知库 finflow_notify（M16）；
+    # 后三者脚本必须显式限定 schema
+    locations: classpath:db/migration,classpath:db/channel,classpath:db/risk,classpath:db/notify
+  # M08 注册中心：local 模式没有第二个服务，默认不接入；remote 模式或 prod 用环境变量打开
+  cloud:
+    nacos:
+      discovery:
+        enabled: ${FINFLOW_NACOS_ENABLED:false}
+        server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
+      # M14 配置中心：namespace 做环境隔离（dev / test / prod 各自一个），group 固定；
+      # 本地默认关闭，远程模式 / prod 用 FINFLOW_NACOS_CONFIG_ENABLED=true 打开
+      config:
+        enabled: ${FINFLOW_NACOS_CONFIG_ENABLED:false}
+        server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
+        namespace: ${FINFLOW_NACOS_NAMESPACE:}
+        group: ${FINFLOW_NACOS_GROUP:FINFLOW_GROUP}
+        file-extension: yaml
+        refresh-enabled: true
+        fail-fast: false
+    # M08 流控 / 熔断：Feign 调渠道服务时由 Sentinel 包裹（feign.sentinel.enabled=true）
+    sentinel:
+      transport:
+        dashboard: ${SENTINEL_DASHBOARD:127.0.0.1:8858}
+        # 与渠道服务（8720）错开，同机双进程不抢端口
+        port: 8719
+    # M08 同步调用超时预算：超时即走降级，不让支付主链路无限等待
+    openfeign:
+      client:
+        config:
+          default:
+            connect-timeout: 2000
+            read-timeout: 5000
+          # M11 风控决策：read-timeout 800ms 高于 M09 的 500ms 决策预算，避免外层先超时；
+          # 超时 / 熔断统一由 RiskDecisionFallbackFactory 按 finflow.risk.decision.on-timeout 降级
+          finflow-risk:
+            connect-timeout: 300
+            read-timeout: 800
   servlet:
     multipart:
       # 文件中心（S38）：商户证件/对账账单等上传上限
@@ -21,11 +61,19 @@ management:
     web:
       exposure:
         include: health,info,metrics,prometheus
+  # M15 Grafana 按服务筛选：所有指标统一打 application 标签（profile 进程解析为 finflow-risk / finflow-channel）
+  metrics:
+    tags:
+      application: ${spring.application.name}
+  tracing:
+    # M15 采样率：本地默认全采样便于联调，生产可用 FINFLOW_TRACING_SAMPLE 降低
+    sampling:
+      probability: ${FINFLOW_TRACING_SAMPLE:1.0}
 
-# S40 链路追踪：traceId 由 TraceIdFilter 写入 MDC（与统一响应体、X-Trace-Id 响应头同源）
-logging:
-  pattern:
-    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%X{traceId}] %logger{36} - %msg%n"
+# M08 Feign 挂 Sentinel：客户端被 Sentinel 包裹后，失败 / 超时 / 熔断统一走 FallbackFactory 降级
+feign:
+  sentinel:
+    enabled: true
 
 # MyBatis-Plus：mapper-locations 用 starter 默认值 classpath*:/mapper/**/*.xml
 mybatis-plus:
@@ -42,14 +90,36 @@ finflow:
   security:
     # Secret 落库加密密钥（AES-256-GCM，S32）：生产必须用环境变量 FINFLOW_SECRET_ENCRYPT_KEY 覆盖
     secret-encrypt-key: ${FINFLOW_SECRET_ENCRYPT_KEY:finflow-local-dev-only-encrypt-key}
+  internal:
+    # M13 网关 ↔ backend 内部令牌：网关取注入档案、回传「已验签」可信标记都用它。
+    # 生产必须用环境变量覆盖，且 backend 不应对公网暴露。
+    token: ${FINFLOW_INTERNAL_TOKEN:finflow-internal-dev-token}
+  openapi:
+    # M12 商户 OpenAPI：签名时间戳允许偏差（秒）、nonce 防重放存活期（须大于 2 倍窗口）。
+    # 平台默认配额（default-qps-limit / default-daily-limit）归 TunableConfig 管，
+    # 默认值在代码里，生产用 Nacos 或环境变量覆盖；见 TunableConfig 常量表。
+    timestamp-window-seconds: ${FINFLOW_OPENAPI_TIMESTAMP_WINDOW:300}
+    nonce-ttl-seconds: ${FINFLOW_OPENAPI_NONCE_TTL:600}
   webhook:
-    # 到期扫描间隔（毫秒）——调度技术参数，不走配置中心；业务参数（最大重试次数）已收拢至 system_config（S37）
+    # 到期扫描间隔（毫秒）——调度技术参数，不走配置中心；最大重试次数已迁至
+    # finflow.webhook.max-retries（M16 起由 TunableConfig 读取，V41 已删除 system_config 存量行）
     scan-fixed-delay-ms: 60000
+  notify:
+    # M16 通知能力部署形态：local=backend 进程内（默认，回退路径）；remote=经 Feign 调独立通知服务
+    mode: ${FINFLOW_NOTIFY_MODE:local}
+    # 事件消费者 / Webhook 重试任务开关：通知服务进程为 true；backend 拆出后置 false，避免重复投递
+    worker: ${FINFLOW_NOTIFY_WORKER:true}
+    # 通知服务进程内标记：true 时注册内部端点并装配事件投影读模型（通知服务 profile 为 true）
+    provider: ${FINFLOW_NOTIFY_PROVIDER:false}
   notification:
     # 通知邮件发件人（S33）：缺省用 spring.mail.username；SMTP 未配置时邮件渠道自动降级为只记日志
     mail-from: ${FINFLOW_MAIL_FROM:}
     # 平台事件（对账异常等）收件邮箱：未配置时平台通知邮件跳过（SKIPPED），站内信不受影响
     platform-email: ${FINFLOW_PLATFORM_EMAIL:}
+  batch:
+    # M17 夜间对账批处理开关：true 时本进程注册对账自动匹配任务；
+    # batch 服务为 true，backend 拆出后置 false，切回 true 即回退到单体进程
+    worker: ${FINFLOW_BATCH_WORKER:true}
   storage:
     # 文件中心对象存储（S38）：docker-compose 的 MinIO（9000 S3 API / 9001 控制台），bucket 启动时自动创建
     endpoint: ${FINFLOW_MINIO_ENDPOINT:http://localhost:9000}
@@ -61,5 +131,22 @@ finflow:
     base-url: ${FINFLOW_CHANNEL_BASE_URL:http://localhost:8090}
     # 签名共享密钥：必须与渠道服务同值（入站通知验签、出站请求签名）
     secret: ${FINFLOW_CHANNEL_SECRET:finflow-fake-channel-secret}
-  # 风控阈值已收拢至 system_config（S37）：risk.review-threshold / risk.reject-threshold
+    # 出站渠道调用的超时预算：必须小于 Feign 的 read-timeout（5000，见 spring.cloud.openfeign），
+    # 否则远程模式下外层 Feign 先超时抛 45002，渠道服务来不及把「下游不可用」按业务未受理返回
+    connect-timeout-ms: ${FINFLOW_CHANNEL_CONNECT_TIMEOUT_MS:2000}
+    read-timeout-ms: ${FINFLOW_CHANNEL_READ_TIMEOUT_MS:2000}
+  # M14 运行时可调参数（风控阈值、入口流控 qps、熔断参数、OpenAPI 默认配额）
+  # 统一由 TunableConfig 读取：代码内提供默认值，Nacos finflow-common.yaml 为事实源，
+  # 环境变量（如 FINFLOW_RISK_FLOW_QPS）作为本地兜底。此处不再重复声明，避免三处默认值打架。
+  channel:
+    # M08 渠道能力部署形态：local=backend 进程内（默认，回退路径）；remote=经 Feign 调独立渠道服务
+    mode: ${FINFLOW_CHANNEL_MODE:local}
+  risk:
+    # M11 风控能力部署形态：local=backend 进程内（默认，回退路径）；remote=经 Feign 调独立风控服务
+    mode: ${FINFLOW_RISK_MODE:local}
+    decision:
+      # M09 风控决策超时预算（毫秒）：超过即按降级策略返回，不让支付线程无限等待
+      timeout-ms: ${FINFLOW_RISK_TIMEOUT_MS:500}
+      # 超时 / 线程池饱和 / 求值异常时的降级判决：allow（默认放行）/ review（转人工）/ reject（拒绝）
+      on-timeout: ${FINFLOW_RISK_TIMEOUT_STRATEGY:allow}
   # 对账账单已切 MinIO（S38）：原 finflow.reconciliation.upload-dir 本地存储废弃

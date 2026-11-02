@@ -1,7 +1,10 @@
 package org.example.finflowbackend.refund.event;
 
-import org.example.finflowbackend.common.event.DomainEvent;
 import org.example.finflowbackend.common.event.DomainEventPublisher;
+import org.example.finflowbackend.contract.DomainEvent;
+import org.example.finflowbackend.contract.EventTopics;
+import org.example.finflowbackend.contract.EventTypes;
+import org.example.finflowbackend.contract.RefundSucceededPayload;
 import org.example.finflowbackend.refund.entity.RefundOrder;
 import org.springframework.stereotype.Component;
 
@@ -22,8 +25,8 @@ public class RefundEventPublisher {
     /** 状态推进成功后调用：SUCCESS 发布 RefundSucceeded，其余状态暂不发。 */
     public void publishFor(RefundOrder refund, String toStatus, String reason) {
         switch (toStatus) {
-            case "SUCCESS" -> eventPublisher.publish(RefundTopics.TOPIC_REFUND_SUCCEEDED,
-                    String.valueOf(refund.getId()), DomainEvent.of(RefundTopics.TYPE_REFUND_SUCCEEDED,
+            case "SUCCESS" -> eventPublisher.publish(EventTopics.REFUND_SUCCEEDED,
+                    String.valueOf(refund.getId()), DomainEvent.of(EventTypes.REFUND_SUCCEEDED,
                             new RefundSucceededPayload(refund.getOrderId(), refund.getRefundNo(),
                                     refund.getPlatformOrderNo(), refund.getMerchantId(),
                                     refund.getRefundAmount(), refund.getCurrency(), refund.getRefundedAt())));

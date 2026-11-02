@@ -25,7 +25,9 @@ public abstract class IntegrationTestBase {
                     .asCompatibleSubstituteFor("mysql"))
             .withUrlParam("serverTimezone", "Asia/Shanghai")
             .withUrlParam("useSSL", "false")
-            .withUrlParam("allowPublicKeyRetrieval", "true");
+            .withUrlParam("allowPublicKeyRetrieval", "true")
+            // M07 起渠道表在独立 schema finflow_channel：迁移要建库并跨库 RENAME，容器用 root（密码同为 test）
+            .withUsername("root");
 
     static {
         MYSQL.start();

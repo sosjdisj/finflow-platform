@@ -1,6 +1,6 @@
 package org.example.finflowbackend.merchant.service.impl;
 
-import org.example.finflowbackend.auth.token.CurrentUser;
+import org.example.finflowbackend.common.context.CurrentUser;
 import org.example.finflowbackend.common.exception.BusinessException;
 import org.example.finflowbackend.merchant.MerchantErrorCode;
 import org.example.finflowbackend.merchant.dto.MerchantCreateRequest;
@@ -9,6 +9,7 @@ import org.example.finflowbackend.merchant.dto.MerchantStatusChangeRequest;
 import org.example.finflowbackend.merchant.dto.MerchantUpdateRequest;
 import org.example.finflowbackend.merchant.entity.Merchant;
 import org.example.finflowbackend.merchant.entity.MerchantStatusLog;
+import org.example.finflowbackend.merchant.event.MerchantNotifyConfigPublisher;
 import org.example.finflowbackend.merchant.mapper.MerchantMapper;
 import org.example.finflowbackend.merchant.mapper.MerchantStatusLogMapper;
 import org.junit.jupiter.api.AfterEach;
@@ -36,7 +37,9 @@ class MerchantServiceImplTest {
 
     private final MerchantMapper merchantMapper = mock(MerchantMapper.class);
     private final MerchantStatusLogMapper statusLogMapper = mock(MerchantStatusLogMapper.class);
-    private final MerchantServiceImpl service = new MerchantServiceImpl(merchantMapper, statusLogMapper);
+    private final MerchantNotifyConfigPublisher notifyConfigPublisher = mock(MerchantNotifyConfigPublisher.class);
+    private final MerchantServiceImpl service =
+            new MerchantServiceImpl(merchantMapper, statusLogMapper, notifyConfigPublisher);
 
     @AfterEach
     void cleanUp() {

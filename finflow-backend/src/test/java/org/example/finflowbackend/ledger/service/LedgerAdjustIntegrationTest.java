@@ -1,11 +1,12 @@
 package org.example.finflowbackend.ledger.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import org.example.finflowbackend.account.AccountErrorCode;
-import org.example.finflowbackend.account.AccountOwnerType;
-import org.example.finflowbackend.account.entity.Account;
+import org.example.finflowbackend.account.api.AccountErrorCode;
+import org.example.finflowbackend.account.api.AccountOwnerType;
+import org.example.finflowbackend.account.api.AccountSnapshot;
 import org.example.finflowbackend.account.service.AccountService;
 import org.example.finflowbackend.common.exception.BusinessException;
+import org.example.finflowbackend.ledger.api.LedgerEntry;
 import org.example.finflowbackend.ledger.entity.AccountLedger;
 import org.example.finflowbackend.ledger.mapper.AccountLedgerMapper;
 import org.example.finflowbackend.support.IntegrationTestBase;
@@ -33,49 +34,49 @@ class LedgerAdjustIntegrationTest extends IntegrationTestBase {
 
     @Test
     void adjustCreditAndDebitBothLeaveLedger() {
-        Account account = accountService.getOrCreate(AccountOwnerType.MERCHANT,
+        AccountSnapshot account = accountService.getOrCreate(AccountOwnerType.MERCHANT,
                 System.nanoTime(), "CNY");
-        long before = account.getAvailableBalance();
+        long before = account.availableBalance();
 
-        AccountLedger up = ledgerService.adjust(account.getId(), 500L, "错账调增");
-        assertEquals(before + 500L, accountService.getAccount(account.getId()).getAvailableBalance());
-        assertEquals(500L, up.getAmount());
-        assertEquals(before, up.getBalanceBefore());
-        assertEquals(before + 500L, up.getBalanceAfter());
-        assertEquals("ADJUSTMENT", up.getBizType());
-        assertEquals("CONSOLE", up.getSource());
-        assertEquals("错账调增", up.getRemark());
-        assertTrue(up.getBizNo().startsWith("ADJ"));
+        LedgerEntry up = ledgerService.adjust(account.id(), 500L, "错账调增");
+        assertEquals(before + 500L, accountService.getAccount(account.id()).getAvailableBalance());
+        assertEquals(500L, up.amount());
+        assertEquals(before, up.balanceBefore());
+        assertEquals(before + 500L, up.balanceAfter());
+        assertEquals("ADJUSTMENT", up.bizType());
+        assertEquals("CONSOLE", up.source());
+        assertEquals("错账调增", up.remark());
+        assertTrue(up.bizNo().startsWith("ADJ"));
 
-        AccountLedger down = ledgerService.adjust(account.getId(), -200L, "错账调减");
-        assertEquals(before + 300L, accountService.getAccount(account.getId()).getAvailableBalance());
-        assertEquals(-200L, down.getAmount());
-        assertEquals(before + 500L, down.getBalanceBefore());
-        assertEquals(before + 300L, down.getBalanceAfter());
+        LedgerEntry down = ledgerService.adjust(account.id(), -200L, "错账调减");
+        assertEquals(before + 300L, accountService.getAccount(account.id()).getAvailableBalance());
+        assertEquals(-200L, down.amount());
+        assertEquals(before + 500L, down.balanceBefore());
+        assertEquals(before + 300L, down.balanceAfter());
     }
 
     @Test
     void adjustZeroAmountRejected() {
-        Account account = accountService.getOrCreate(AccountOwnerType.MERCHANT,
+        AccountSnapshot account = accountService.getOrCreate(AccountOwnerType.MERCHANT,
                 System.nanoTime(), "CNY");
         BusinessException e = assertThrows(BusinessException.class,
-                () -> ledgerService.adjust(account.getId(), 0L, null));
+                () -> ledgerService.adjust(account.id(), 0L, null));
         assertEquals(AccountErrorCode.ADJUST_AMOUNT_ZERO, e.getErrorCode());
     }
 
     @Test
     void adjustDebitInsufficientBalanceRejected() {
-        Account account = accountService.getOrCreate(AccountOwnerType.MERCHANT,
+        AccountSnapshot account = accountService.getOrCreate(AccountOwnerType.MERCHANT,
                 System.nanoTime(), "CNY");
-        ledgerService.adjust(account.getId(), 100L, null);
-        long before = accountService.getAccount(account.getId()).getAvailableBalance();
+        ledgerService.adjust(account.id(), 100L, null);
+        long before = accountService.getAccount(account.id()).getAvailableBalance();
 
         BusinessException e = assertThrows(BusinessException.class,
-                () -> ledgerService.adjust(account.getId(), -999L, null));
+                () -> ledgerService.adjust(account.id(), -999L, null));
         assertEquals(AccountErrorCode.ACCOUNT_INSUFFICIENT_BALANCE, e.getErrorCode());
-        assertEquals(before, accountService.getAccount(account.getId()).getAvailableBalance());
+        assertEquals(before, accountService.getAccount(account.id()).getAvailableBalance());
         // 拒绝的调账不留流水：该账户只有调增那一条 ADJUSTMENT
         assertEquals(1L, ledgerMapper.selectCount(new LambdaQueryWrapper<AccountLedger>()
-                .eq(AccountLedger::getAccountId, account.getId())));
+                .eq(AccountLedger::getAccountId, account.id())));
     }
 }

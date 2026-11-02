@@ -2,13 +2,14 @@ package org.example.finflowbackend.notification.service;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.example.finflowbackend.common.exception.BusinessException;
-import org.example.finflowbackend.merchant.service.MerchantService;
 import org.example.finflowbackend.notification.NotificationErrorCode;
 import org.example.finflowbackend.notification.NotificationProperties;
 import org.example.finflowbackend.notification.entity.Notification;
 import org.example.finflowbackend.notification.entity.NotificationTemplate;
 import org.example.finflowbackend.notification.mapper.NotificationMapper;
 import org.example.finflowbackend.notification.mapper.NotificationTemplateMapper;
+import org.example.finflowbackend.notify.api.NotifyConfig;
+import org.example.finflowbackend.notify.api.NotifyMerchantConfigApi;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DuplicateKeyException;
@@ -36,20 +37,20 @@ public class NotificationService {
     private final NotificationMapper notificationMapper;
     private final TemplateRenderer renderer;
     private final MailChannel mailChannel;
-    private final MerchantService merchantService;
+    private final NotifyMerchantConfigApi configApi;
     private final NotificationProperties properties;
 
     public NotificationService(NotificationTemplateMapper templateMapper,
                                NotificationMapper notificationMapper,
                                TemplateRenderer renderer,
                                MailChannel mailChannel,
-                               MerchantService merchantService,
+                               NotifyMerchantConfigApi configApi,
                                NotificationProperties properties) {
         this.templateMapper = templateMapper;
         this.notificationMapper = notificationMapper;
         this.renderer = renderer;
         this.mailChannel = mailChannel;
-        this.merchantService = merchantService;
+        this.configApi = configApi;
         this.properties = properties;
     }
 
@@ -128,7 +129,6 @@ public class NotificationService {
     }
 
     private String merchantEmail(Long merchantId) {
-        var merchant = merchantService.getDetail(merchantId).merchant();
-        return merchant == null ? null : merchant.contactEmail();
+        return configApi.find(merchantId).map(NotifyConfig::contactEmail).orElse(null);
     }
 }

@@ -1,23 +1,23 @@
 package org.example.finflowbackend.clearing.event;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import org.example.finflowbackend.channel.api.ChannelConfigApi;
+import org.example.finflowbackend.channel.api.PaymentTransactionApi;
 import org.example.finflowbackend.clearing.entity.ClearingDetail;
 import org.example.finflowbackend.clearing.entity.ClearingOrder;
 import org.example.finflowbackend.clearing.mapper.ClearingDetailMapper;
 import org.example.finflowbackend.clearing.mapper.ClearingOrderMapper;
 import org.example.finflowbackend.clearing.service.FeeCalculator;
-import org.example.finflowbackend.common.event.DomainEvent;
 import org.example.finflowbackend.common.event.EventDeduplicationService;
-import org.example.finflowbackend.merchant.dto.ClearingFeeRateView;
-import org.example.finflowbackend.merchant.service.RateService;
-import org.example.finflowbackend.payment.dto.PaymentOrderResponse;
-import org.example.finflowbackend.payment.event.PaymentSucceededPayload;
-import org.example.finflowbackend.payment.event.PaymentTopics;
-import org.example.finflowbackend.payment.service.ChannelConfigService;
-import org.example.finflowbackend.payment.service.PaymentOrderService;
-import org.example.finflowbackend.payment.service.PaymentTransactionService;
-import org.example.finflowbackend.system.config.ConfigKeys;
-import org.example.finflowbackend.system.service.ConfigService;
+import org.example.finflowbackend.contract.DomainEvent;
+import org.example.finflowbackend.contract.EventTopics;
+import org.example.finflowbackend.contract.PaymentSucceededPayload;
+import org.example.finflowbackend.merchant.api.ClearingFeeRateView;
+import org.example.finflowbackend.merchant.api.RateApi;
+import org.example.finflowbackend.payment.api.PaymentOrderApi;
+import org.example.finflowbackend.payment.api.PaymentOrderResponse;
+import org.example.finflowbackend.system.api.ConfigApi;
+import org.example.finflowbackend.system.api.ConfigKeys;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DuplicateKeyException;
@@ -52,35 +52,35 @@ public class ClearingEventConsumer {
     private final ClearingOrderMapper clearingOrderMapper;
     private final ClearingDetailMapper clearingDetailMapper;
     private final FeeCalculator feeCalculator;
-    private final PaymentOrderService paymentOrderService;
-    private final PaymentTransactionService paymentTransactionService;
-    private final ChannelConfigService channelConfigService;
-    private final RateService rateService;
-    private final ConfigService configService;
+    private final PaymentOrderApi paymentOrderApi;
+    private final PaymentTransactionApi paymentTransactionApi;
+    private final ChannelConfigApi channelConfigApi;
+    private final RateApi rateApi;
+    private final ConfigApi configApi;
 
     public ClearingEventConsumer(EventDeduplicationService deduplicationService,
                                  ObjectMapper objectMapper,
                                  ClearingOrderMapper clearingOrderMapper,
                                  ClearingDetailMapper clearingDetailMapper,
                                  FeeCalculator feeCalculator,
-                                 PaymentOrderService paymentOrderService,
-                                 PaymentTransactionService paymentTransactionService,
-                                 ChannelConfigService channelConfigService,
-                                 RateService rateService, ConfigService configService) {
+                                 PaymentOrderApi paymentOrderApi,
+                                 PaymentTransactionApi paymentTransactionApi,
+                                 ChannelConfigApi channelConfigApi,
+                                 RateApi rateApi, ConfigApi configApi) {
         this.deduplicationService = deduplicationService;
         this.objectMapper = objectMapper;
         this.clearingOrderMapper = clearingOrderMapper;
         this.clearingDetailMapper = clearingDetailMapper;
         this.feeCalculator = feeCalculator;
-        this.paymentOrderService = paymentOrderService;
-        this.paymentTransactionService = paymentTransactionService;
-        this.channelConfigService = channelConfigService;
-        this.rateService = rateService;
-        this.configService = configService;
+        this.paymentOrderApi = paymentOrderApi;
+        this.paymentTransactionApi = paymentTransactionApi;
+        this.channelConfigApi = channelConfigApi;
+        this.rateApi = rateApi;
+        this.configApi = configApi;
     }
 
     /** 1 单 + 3 明细需原子落库：@Transactional 放在监听方法（容器经代理调用）。 */
-    @KafkaListener(topics = PaymentTopics.TOPIC_SUCCEEDED, groupId = GROUP_ID)
+    @KafkaListener(topics = EventTopics.PAYMENT_SUCCEEDED, groupId = GROUP_ID)
     @Transactional
     public void onMessage(String message) {
         handle(message);
@@ -96,7 +96,7 @@ public class ClearingEventConsumer {
         PaymentSucceededPayload payload =
                 objectMapper.convertValue(event.payload(), PaymentSucceededPayload.class);
         // 以订单为准（防 payload 陈旧/历史消息缺字段），商户与金额回查
-        PaymentOrderResponse order = paymentOrderService.get(payload.orderId());
+        PaymentOrderResponse order = paymentOrderApi.get(payload.orderId());
         if (clearingOrderMapper.selectCount(
                 Wrappers.<ClearingOrder>query().eq("order_id", order.id())) > 0) {
             log.info("[清分消费者] 订单已清分，跳过: orderId={}", order.id());
@@ -106,14 +106,14 @@ public class ClearingEventConsumer {
     }
 
     private void clear(PaymentOrderResponse order, LocalDate settleDate) {
-        String channelCode = paymentTransactionService.findChannelCode(order.id());
+        String channelCode = paymentTransactionApi.findChannelCode(order.id());
         if (channelCode == null) {
             channelCode = UNKNOWN_CHANNEL;
             log.warn("[清分消费者] 未找到收款渠道交互记录，渠道成本按 0 计: orderId={}", order.id());
         }
         ClearingFeeRateView rate = resolveRate(order.merchantId());
         Long channelCostBps = UNKNOWN_CHANNEL.equals(channelCode) ? null
-                : channelConfigService.getCostRateBps(channelCode);
+                : channelConfigApi.getCostRateBps(channelCode);
         FeeCalculator.Split split = feeCalculator.split(order.amount(), rate, channelCostBps);
 
         ClearingOrder clearing = new ClearingOrder();
@@ -147,11 +147,11 @@ public class ClearingEventConsumer {
 
     /** 商户费率：未配置时回退平台默认费率（S37 配置中心，改配置即生效）。 */
     private ClearingFeeRateView resolveRate(Long merchantId) {
-        ClearingFeeRateView rate = rateService.getFeeRateView(merchantId);
+        ClearingFeeRateView rate = rateApi.getFeeRateView(merchantId);
         if (rate != null) {
             return rate;
         }
-        long defaultBps = configService.getLong(ConfigKeys.MERCHANT_RATE_DEFAULT_BPS);
+        long defaultBps = configApi.getLong(ConfigKeys.MERCHANT_RATE_DEFAULT_BPS);
         log.info("[清分消费者] 商户未配置费率，按平台默认费率计: merchantId={}, rateBps={}", merchantId, defaultBps);
         return new ClearingFeeRateView(merchantId, ClearingFeeRateView.MODE_PLAIN, defaultBps, 0L, List.of());
     }

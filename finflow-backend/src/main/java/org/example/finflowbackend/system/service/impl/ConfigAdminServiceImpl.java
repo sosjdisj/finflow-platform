@@ -1,12 +1,12 @@
 package org.example.finflowbackend.system.service.impl;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
-import org.example.finflowbackend.audit.AuditRecorder;
-import org.example.finflowbackend.auth.token.CurrentUser;
-import org.example.finflowbackend.auth.web.CurrentUserHolder;
+import org.example.finflowbackend.audit.api.AuditApi;
+import org.example.finflowbackend.common.context.CurrentUser;
+import org.example.finflowbackend.common.context.CurrentUserHolder;
 import org.example.finflowbackend.common.exception.BusinessException;
 import org.example.finflowbackend.system.SystemErrorCode;
-import org.example.finflowbackend.system.config.ConfigKeys;
+import org.example.finflowbackend.system.api.ConfigKeys;
 import org.example.finflowbackend.system.dto.ConfigResponse;
 import org.example.finflowbackend.system.dto.ConfigUpdateRequest;
 import org.example.finflowbackend.system.entity.SystemConfig;
@@ -27,19 +27,24 @@ public class ConfigAdminServiceImpl implements ConfigAdminService {
 
     private final SystemConfigMapper configMapper;
     private final StringRedisTemplate redisTemplate;
-    private final AuditRecorder auditRecorder;
+    private final AuditApi auditApi;
 
     public ConfigAdminServiceImpl(SystemConfigMapper configMapper, StringRedisTemplate redisTemplate,
-                                  AuditRecorder auditRecorder) {
+                                  AuditApi auditApi) {
         this.configMapper = configMapper;
         this.redisTemplate = redisTemplate;
-        this.auditRecorder = auditRecorder;
+        this.auditApi = auditApi;
     }
 
     @Override
     public List<ConfigResponse> listAll() {
+        // 只展示仍在 ConfigKeys 登记的项：历史遗留行（如 M14 已迁往 Nacos 的风控阈值）不再暴露，
+        // 防止「后台可改但运行时已不读」的假事实源
         return configMapper.selectList(Wrappers.<SystemConfig>query().orderByAsc("config_key"))
-                .stream().map(ConfigResponse::from).toList();
+                .stream()
+                .filter(config -> ConfigKeys.of(config.getConfigKey()).isPresent())
+                .map(ConfigResponse::from)
+                .toList();
     }
 
     @Override
@@ -66,7 +71,7 @@ public class ConfigAdminServiceImpl implements ConfigAdminService {
         config.setUpdatedBy(actor == null ? 0L : actor.userId());
         configMapper.updateById(config);
 
-        auditRecorder.submit(before, snapshot(config));
+        auditApi.submit(before, snapshot(config));
         // 刷新 = 删缓存：即使删除失败，TTL 兜底最多延迟 10 分钟
         redisTemplate.delete(ConfigServiceImpl.CACHE_KEY_PREFIX + key);
         return ConfigResponse.from(config);

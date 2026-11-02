@@ -1,22 +1,22 @@
 package org.example.finflowbackend.clearing;
 
+import org.example.finflowbackend.channel.api.ChannelConfigApi;
+import org.example.finflowbackend.channel.api.PaymentTransactionApi;
 import org.example.finflowbackend.clearing.entity.ClearingDetail;
 import org.example.finflowbackend.clearing.entity.ClearingOrder;
 import org.example.finflowbackend.clearing.event.ClearingEventConsumer;
 import org.example.finflowbackend.clearing.mapper.ClearingDetailMapper;
 import org.example.finflowbackend.clearing.mapper.ClearingOrderMapper;
 import org.example.finflowbackend.clearing.service.FeeCalculator;
-import org.example.finflowbackend.common.event.DomainEvent;
 import org.example.finflowbackend.common.event.EventDeduplicationService;
-import org.example.finflowbackend.merchant.dto.ClearingFeeRateView;
+import org.example.finflowbackend.contract.DomainEvent;
+import org.example.finflowbackend.contract.EventTypes;
+import org.example.finflowbackend.contract.PaymentSucceededPayload;
+import org.example.finflowbackend.merchant.api.ClearingFeeRateView;
 import org.example.finflowbackend.merchant.service.RateService;
-import org.example.finflowbackend.payment.dto.PaymentOrderResponse;
-import org.example.finflowbackend.payment.event.PaymentSucceededPayload;
-import org.example.finflowbackend.payment.event.PaymentTopics;
-import org.example.finflowbackend.payment.service.ChannelConfigService;
+import org.example.finflowbackend.payment.api.PaymentOrderResponse;
 import org.example.finflowbackend.payment.service.PaymentOrderService;
-import org.example.finflowbackend.payment.service.PaymentTransactionService;
-import org.example.finflowbackend.system.config.ConfigKeys;
+import org.example.finflowbackend.system.api.ConfigKeys;
 import org.example.finflowbackend.system.service.ConfigService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -51,8 +51,8 @@ class ClearingEventConsumerTest {
     private ClearingOrderMapper clearingOrderMapper;
     private ClearingDetailMapper clearingDetailMapper;
     private PaymentOrderService paymentOrderService;
-    private PaymentTransactionService transactionService;
-    private ChannelConfigService channelConfigService;
+    private PaymentTransactionApi transactionService;
+    private ChannelConfigApi channelConfigService;
     private RateService rateService;
     private ConfigService configService;
     private ClearingEventConsumer consumer;
@@ -64,8 +64,8 @@ class ClearingEventConsumerTest {
         clearingOrderMapper = mock(ClearingOrderMapper.class);
         clearingDetailMapper = mock(ClearingDetailMapper.class);
         paymentOrderService = mock(PaymentOrderService.class);
-        transactionService = mock(PaymentTransactionService.class);
-        channelConfigService = mock(ChannelConfigService.class);
+        transactionService = mock(PaymentTransactionApi.class);
+        channelConfigService = mock(ChannelConfigApi.class);
         rateService = mock(RateService.class);
         configService = mock(ConfigService.class);
         when(configService.getLong(ConfigKeys.MERCHANT_RATE_DEFAULT_BPS)).thenReturn(60L);
@@ -195,8 +195,9 @@ class ClearingEventConsumerTest {
     }
 
     private String message() {
-        DomainEvent event = new DomainEvent(EVENT_ID, PaymentTopics.TYPE_SUCCEEDED, Instant.now(),
-                new PaymentSucceededPayload(ORDER_ID, "P20261017000013", 10000L, "CNY",
+        DomainEvent event = new DomainEvent(EVENT_ID, EventTypes.PAYMENT_SUCCEEDED, Instant.now(),
+                DomainEvent.CURRENT_VERSION,
+                new PaymentSucceededPayload(ORDER_ID, MERCHANT_ID, "P20261017000013", 10000L, "CNY",
                         LocalDateTime.of(2026, 10, 17, 12, 0)));
         return objectMapper.writeValueAsString(event);
     }

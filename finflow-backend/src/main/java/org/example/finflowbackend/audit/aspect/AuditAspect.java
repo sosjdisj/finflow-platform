@@ -2,11 +2,11 @@ package org.example.finflowbackend.audit.aspect;
 
 import jakarta.servlet.http.HttpServletRequest;
 import org.example.finflowbackend.audit.AuditRecorder;
-import org.example.finflowbackend.audit.annotation.Audited;
+import org.example.finflowbackend.audit.api.Audited;
 import org.example.finflowbackend.audit.entity.AuditLog;
 import org.example.finflowbackend.audit.service.AuditWriter;
-import org.example.finflowbackend.auth.token.CurrentUser;
-import org.example.finflowbackend.auth.web.CurrentUserHolder;
+import org.example.finflowbackend.common.context.CurrentUser;
+import org.example.finflowbackend.common.context.CurrentUserHolder;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;

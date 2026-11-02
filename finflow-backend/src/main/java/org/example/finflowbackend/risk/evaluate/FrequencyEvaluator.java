@@ -17,7 +17,7 @@ import java.time.Duration;
 @Component
 public class FrequencyEvaluator implements RuleEvaluator {
 
-    static final String KEY_PREFIX = "risk:freq:merchant:";
+    public static final String KEY_PREFIX = "risk:freq:mercahnt:";
 
     private final StringRedisTemplate redisTemplate;
 

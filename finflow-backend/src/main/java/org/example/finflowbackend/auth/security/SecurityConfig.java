@@ -39,8 +39,12 @@ public class SecurityConfig {
             "/api/v1/auth/refresh",
             "/api/v1/auth/logout",
             "/api/v1/auth/captcha",
+            // M12 商户 OpenAPI：不走后台 JWT，由 OpenApiAuthFilter 做 AK/SK 验签
+            "/open/v1/**",
             // 渠道异步通知（通道侧回调，无登录态，靠 HMAC 签名验签）
             "/api/v1/channels/**",
+            // M08 内部端点（渠道服务 → backend 的回调转发），只在内网可达，不对公网暴露
+            "/api/v1/internal/**",
             // S40 OpenAPI 文档
             "/swagger-ui/**",
             "/swagger-ui.html",

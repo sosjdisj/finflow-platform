@@ -5,8 +5,9 @@ import org.example.finflowbackend.common.util.HmacSigner;
 import org.example.finflowbackend.merchant.MerchantErrorCode;
 import org.example.finflowbackend.merchant.dto.ApiKeyCreateResponse;
 import org.example.finflowbackend.merchant.dto.IpWhitelistUpdateRequest;
-import org.example.finflowbackend.merchant.dto.MerchantDetailResponse;
+import org.example.finflowbackend.merchant.api.MerchantDetailResponse;
 import org.example.finflowbackend.merchant.entity.MerchantApiKey;
+import org.example.finflowbackend.merchant.event.MerchantNotifyConfigPublisher;
 import org.example.finflowbackend.merchant.mapper.MerchantApiKeyMapper;
 import org.example.finflowbackend.merchant.service.MerchantService;
 import org.junit.jupiter.api.Test;
@@ -35,7 +36,9 @@ class ApiKeyServiceImplTest {
 
     private final MerchantApiKeyMapper apiKeyMapper = mock(MerchantApiKeyMapper.class);
     private final MerchantService merchantService = mock(MerchantService.class);
-    private final ApiKeyServiceImpl service = new ApiKeyServiceImpl(apiKeyMapper, merchantService, TEST_KEY);
+    private final MerchantNotifyConfigPublisher notifyConfigPublisher = mock(MerchantNotifyConfigPublisher.class);
+    private final ApiKeyServiceImpl service =
+            new ApiKeyServiceImpl(apiKeyMapper, merchantService, notifyConfigPublisher, TEST_KEY);
 
     @Test
     void createStoresHashOnlyAndReturnsSecretOnce() {

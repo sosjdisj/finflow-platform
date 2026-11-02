@@ -9,12 +9,13 @@ import lombok.Setter;
 import java.time.LocalDateTime;
 
 /**
- * 风险事件（表 risk_event）：每次风控检查留痕，只增不改。
+ * 风险事件（表 finflow_risk.risk_event）：每次风控检查留痕，只增不改。
+ * 由 V27 建表，M10/V36 起归属风控库 finflow_risk。
  * 订单要素与命中规则明细均快照落库，订单后续状态变化不影响本记录。
  */
 @Getter
 @Setter
-@TableName("risk_event")
+@TableName(value = "risk_event", schema = "finflow_risk")
 public class RiskEvent {
 
     /** 判决：放行。 */

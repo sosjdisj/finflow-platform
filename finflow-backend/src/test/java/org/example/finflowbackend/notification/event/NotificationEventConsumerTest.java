@@ -2,13 +2,10 @@ package org.example.finflowbackend.notification.event;
 
 import org.example.finflowbackend.common.event.EventDeduplicationService;
 import org.example.finflowbackend.notification.service.NotificationService;
-import org.example.finflowbackend.payment.dto.PaymentOrderResponse;
-import org.example.finflowbackend.payment.service.PaymentOrderService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import tools.jackson.databind.ObjectMapper;
 
-import java.time.LocalDateTime;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -21,27 +18,25 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * 通知消费者单测（S33）：事件路由到对应模板与商户、支付事件回查订单取商户、
- * 金额分转元展示、重复事件跳过；风控拦截回查订单路由商户、对账异常走平台通知。
+ * 通知消费者单测（S33 / M16）：事件路由到对应模板与商户、金额分转元展示、重复事件跳过；
+ * M16 起商户 / 平台单号直接取自 payload（不再同步回查订单），对账异常仍走平台通知。
  */
 class NotificationEventConsumerTest {
 
     private final EventDeduplicationService deduplicationService = mock(EventDeduplicationService.class);
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final PaymentOrderService paymentOrderService = mock(PaymentOrderService.class);
     private final NotificationService notificationService = mock(NotificationService.class);
 
     private final NotificationEventConsumer consumer = new NotificationEventConsumer(
-            deduplicationService, objectMapper, paymentOrderService, notificationService);
+            deduplicationService, objectMapper, notificationService);
 
     @Test
-    void paymentSucceededRoutesToMerchantOfOrder() {
+    void paymentSucceededRoutesToMerchantFromPayload() {
         when(deduplicationService.tryConsume(anyString(), anyString())).thenReturn(true);
-        when(paymentOrderService.get(9L)).thenReturn(orderResponse(9L, 7L, "PO2026001"));
 
         consumer.onPaymentSucceeded("""
                 {"eventId":"evt-pay-1","eventType":"PAYMENT_SUCCEEDED","occurredAt":"2026-10-18T15:00:00Z",
-                 "payload":{"orderId":9,"platformOrderNo":"PO2026001","amount":10000,
+                 "payload":{"orderId":9,"merchantId":7,"platformOrderNo":"PO2026001","amount":10000,
                             "currency":"CNY","paidAt":"2026-10-18T15:00:00"}}
                 """);
 
@@ -52,7 +47,6 @@ class NotificationEventConsumerTest {
         verify(notificationService).sendMerchantNotification(templateCaptor.capture(),
                 eq("evt-pay-1"), merchantCaptor.capture(), paramsCaptor.capture());
         assertEquals("PAYMENT_SUCCEEDED", templateCaptor.getValue());
-        // 商户来自回查订单，而非 payload
         assertEquals(7L, merchantCaptor.getValue());
         assertEquals("PO2026001", paramsCaptor.getValue().get("platformOrderNo"));
         assertEquals("100.00", paramsCaptor.getValue().get("amount"));
@@ -99,20 +93,18 @@ class NotificationEventConsumerTest {
     }
 
     @Test
-    void riskInterceptedRoutesToMerchantOfOrder() {
+    void riskInterceptedRoutesToMerchantFromPayload() {
         when(deduplicationService.tryConsume(anyString(), anyString())).thenReturn(true);
-        when(paymentOrderService.get(9L)).thenReturn(orderResponse(9L, 7L, "PO2026001"));
 
         consumer.onRiskIntercepted("""
                 {"eventId":"evt-risk-1","eventType":"RISK_INTERCEPTED","occurredAt":"2026-10-18T15:00:00Z",
-                 "payload":{"orderId":9,"merchantId":99,"verdict":"REVIEW","totalScore":30,
-                            "reason":"风险分 30 达到审核阈值 30"}}
+                 "payload":{"orderId":9,"merchantId":99,"platformOrderNo":"PO2026001",
+                            "verdict":"REVIEW","totalScore":30,"reason":"风险分 30 达到审核阈值 30"}}
                 """);
 
         ArgumentCaptor<Map<String, String>> paramsCaptor = paramsCaptor();
-        // 商户与平台单号来自回查订单，而非 payload（payload.merchantId=99 被忽略）
         verify(notificationService).sendMerchantNotification(eq("RISK_INTERCEPTED"), eq("evt-risk-1"),
-                eq(7L), paramsCaptor.capture());
+                eq(99L), paramsCaptor.capture());
         assertEquals("PO2026001", paramsCaptor.getValue().get("platformOrderNo"));
         assertEquals("拦截审核", paramsCaptor.getValue().get("action"));
         assertEquals("30", paramsCaptor.getValue().get("score"));
@@ -137,8 +129,6 @@ class NotificationEventConsumerTest {
         assertEquals("金额不一致", paramsCaptor.getValue().get("differenceType"));
         assertEquals("100.00", paramsCaptor.getValue().get("platformAmount"));
         assertEquals("99.00", paramsCaptor.getValue().get("channelAmount"));
-        // 平台通知不应触发商户查询
-        verify(paymentOrderService, never()).get(any());
     }
 
     @Test
@@ -157,11 +147,5 @@ class NotificationEventConsumerTest {
     @SuppressWarnings("unchecked")
     private ArgumentCaptor<Map<String, String>> paramsCaptor() {
         return ArgumentCaptor.forClass(Map.class);
-    }
-
-    private PaymentOrderResponse orderResponse(Long id, Long merchantId, String orderNo) {
-        return new PaymentOrderResponse(id, merchantId, "OUT-1", orderNo, 10000L, 0L, "CNY",
-                "测试商品", "测试订单", "WALLET", null, LocalDateTime.now().plusHours(2),
-                "SUCCESS", LocalDateTime.now());
     }
 }

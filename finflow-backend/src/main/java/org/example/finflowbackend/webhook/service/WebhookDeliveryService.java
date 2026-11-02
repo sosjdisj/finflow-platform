@@ -1,11 +1,10 @@
 package org.example.finflowbackend.webhook.service;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import org.example.finflowbackend.common.tunable.TunableConfig;
 import org.example.finflowbackend.common.util.HmacSigner;
-import org.example.finflowbackend.merchant.service.ApiKeyService;
-import org.example.finflowbackend.merchant.service.MerchantService;
-import org.example.finflowbackend.system.config.ConfigKeys;
-import org.example.finflowbackend.system.service.ConfigService;
+import org.example.finflowbackend.notify.api.NotifyConfig;
+import org.example.finflowbackend.notify.api.NotifyMerchantConfigApi;
 import org.example.finflowbackend.webhook.entity.WebhookDelivery;
 import org.example.finflowbackend.webhook.entity.WebhookEvent;
 import org.example.finflowbackend.webhook.mapper.WebhookDeliveryMapper;
@@ -22,15 +21,15 @@ import org.springframework.web.client.RestClientException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.Optional;
 
 /**
- * Webhook 投递核心（S32）：首次投递与重试共用本入口。
- * 流程：读 PENDING 事件 → 实时取商户回调地址与签名 Secret（模块间走 Service，铁律 4）
+ * Webhook 投递核心（S32 / M16）：首次投递与重试共用本入口。
+ * 流程：读 PENDING 事件 → 取商户通知配置（{@link NotifyMerchantConfigApi}，本地或投影）
  * → HMAC-SHA256 签名（复用 S09 HmacSigner，签名串 = timestamp + "." + body，防重放）
  * → POST → 写投递日志（一次尝试一行，只增不改）→ 按 WebhookRetryPolicy 推进事件状态。
- * 不在事务内做外部 HTTP 调用；事件状态更新带 status='PENDING' 条件，
- * 与重试任务并发时同一事件最多被投两次（商户按 eventId 幂等），不会丢日志。
+ *
+ * <p>M16：商户/mapper 全部来自本服务自己的数据，无跨服务同步调用；
+ * 外部 HTTP 调用只发生在通知服务进程内，与支付主链彻底隔离。</p>
  */
 @Service
 public class WebhookDeliveryService {
@@ -47,21 +46,18 @@ public class WebhookDeliveryService {
 
     private final WebhookEventMapper eventMapper;
     private final WebhookDeliveryMapper deliveryMapper;
-    private final MerchantService merchantService;
-    private final ApiKeyService apiKeyService;
-    private final ConfigService configService;
+    private final NotifyMerchantConfigApi configApi;
+    private final TunableConfig tunables;
     private final RestClient restClient;
 
     public WebhookDeliveryService(WebhookEventMapper eventMapper,
                                   WebhookDeliveryMapper deliveryMapper,
-                                  MerchantService merchantService,
-                                  ApiKeyService apiKeyService,
-                                  ConfigService configService) {
+                                  NotifyMerchantConfigApi configApi,
+                                  TunableConfig tunables) {
         this.eventMapper = eventMapper;
         this.deliveryMapper = deliveryMapper;
-        this.merchantService = merchantService;
-        this.apiKeyService = apiKeyService;
-        this.configService = configService;
+        this.configApi = configApi;
+        this.tunables = tunables;
         // 连接超时 5s / 读超时 10s：回调地址是外部系统，不能拖死扫描任务
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(Duration.ofSeconds(5));
@@ -79,9 +75,10 @@ public class WebhookDeliveryService {
         if (event == null || !WebhookEvent.STATUS_PENDING.equals(event.getStatus())) {
             return false;
         }
-        String webhookUrl = webhookUrlOf(event.getMerchantId());
-        Optional<String> secret = apiKeyService.findSigningSecret(event.getMerchantId());
-        if (webhookUrl == null || secret.isEmpty()) {
+        NotifyConfig config = configApi.find(event.getMerchantId()).orElse(null);
+        String webhookUrl = config == null ? null : config.webhookUrl();
+        String secret = config == null ? null : config.signingSecret();
+        if (webhookUrl == null || webhookUrl.isBlank() || secret == null) {
             log.warn("[Webhook投递] 商户缺少回调地址或可签名凭证，置为耗尽待手动重试: eventId={}, merchantId={}",
                     event.getEventId(), event.getMerchantId());
             markExhausted(event);
@@ -93,7 +90,7 @@ public class WebhookDeliveryService {
         String responseBody = null;
         boolean success = false;
         try {
-            var result = post(webhookUrl, event, secret.get());
+            var result = post(webhookUrl, event, secret);
             responseCode = result.code();
             responseBody = result.body();
             success = responseCode >= 200 && responseCode < 300;
@@ -106,13 +103,6 @@ public class WebhookDeliveryService {
         recordDelivery(event, success, responseCode, responseBody, durationMs);
         advance(event, success);
         return success;
-    }
-
-    /** 商户回调地址（实时读，商户改地址后下次重试即用新地址）。 */
-    private String webhookUrlOf(Long merchantId) {
-        return Optional.ofNullable(merchantService.getDetail(merchantId).merchant())
-                .map(merchant -> merchant.webhookUrl())
-                .orElse(null);
     }
 
     private PostResult post(String url, WebhookEvent event, String secret) {
@@ -159,10 +149,9 @@ public class WebhookDeliveryService {
                     .set("status", WebhookEvent.STATUS_SUCCESS));
             return;
         }
-        // 最大重试次数实时读配置中心（S37），调参后无需重启
+        // 最大重试次数从运行配置读取（M16 起不再走 system_config：通知服务无法同步回查配置中心）
         int newRetryCount = event.getRetryCount() + 1;
-        if (WebhookRetryPolicy.exhausted(newRetryCount,
-                (int) configService.getLong(ConfigKeys.WEBHOOK_MAX_RETRIES))) {
+        if (WebhookRetryPolicy.exhausted(newRetryCount, tunables.webhookMaxRetries())) {
             markExhausted(event);
             return;
         }

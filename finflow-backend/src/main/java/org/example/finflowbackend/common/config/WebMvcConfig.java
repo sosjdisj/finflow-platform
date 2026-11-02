@@ -19,6 +19,7 @@ public class WebMvcConfig implements WebMvcConfigurer {
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
-        registry.addInterceptor(idempotencyInterceptor).addPathPatterns("/api/v1/**");
+        // /open/v1 同样受 @Idempotent 约束（M12：商户下单 / 退款重复提交回放）
+        registry.addInterceptor(idempotencyInterceptor).addPathPatterns("/api/v1/**", "/open/v1/**");
     }
 }

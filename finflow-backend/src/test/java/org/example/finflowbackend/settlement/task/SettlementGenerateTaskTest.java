@@ -1,7 +1,7 @@
 package org.example.finflowbackend.settlement.task;
 
 import org.example.finflowbackend.settlement.service.SettlementGenerateService;
-import org.example.finflowbackend.system.config.ConfigKeys;
+import org.example.finflowbackend.system.api.ConfigKeys;
 import org.example.finflowbackend.system.service.ConfigService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

@@ -1,21 +1,19 @@
 package org.example.finflowbackend.notification.service;
 
 import org.example.finflowbackend.common.exception.BusinessException;
-import org.example.finflowbackend.merchant.dto.MerchantDetailResponse;
-import org.example.finflowbackend.merchant.dto.MerchantResponse;
-import org.example.finflowbackend.merchant.entity.Merchant;
-import org.example.finflowbackend.merchant.service.MerchantService;
 import org.example.finflowbackend.notification.NotificationProperties;
 import org.example.finflowbackend.notification.entity.Notification;
 import org.example.finflowbackend.notification.entity.NotificationTemplate;
 import org.example.finflowbackend.notification.mapper.NotificationMapper;
 import org.example.finflowbackend.notification.mapper.NotificationTemplateMapper;
+import org.example.finflowbackend.notify.api.NotifyConfig;
+import org.example.finflowbackend.notify.api.NotifyMerchantConfigApi;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DuplicateKeyException;
 
-import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -40,10 +38,10 @@ class NotificationServiceTest {
     private final NotificationTemplateMapper templateMapper = mock(NotificationTemplateMapper.class);
     private final NotificationMapper notificationMapper = mock(NotificationMapper.class);
     private final MailChannel mailChannel = mock(MailChannel.class);
-    private final MerchantService merchantService = mock(MerchantService.class);
+    private final NotifyMerchantConfigApi configApi = mock(NotifyMerchantConfigApi.class);
 
     private final NotificationService service = new NotificationService(
-            templateMapper, notificationMapper, new TemplateRenderer(), mailChannel, merchantService,
+            templateMapper, notificationMapper, new TemplateRenderer(), mailChannel, configApi,
             new NotificationProperties(null, null));
 
     @Test
@@ -130,7 +128,7 @@ class NotificationServiceTest {
     @Test
     void platformNotificationTargetsUserMailbox() {
         NotificationService service = new NotificationService(templateMapper, notificationMapper,
-                new TemplateRenderer(), mailChannel, merchantService,
+                new TemplateRenderer(), mailChannel, configApi,
                 new NotificationProperties(null, "ops@finflow.local"));
         when(templateMapper.selectOne(any())).thenReturn(TEMPLATE);
         when(notificationMapper.insert(any(Notification.class))).thenReturn(1);
@@ -147,7 +145,7 @@ class NotificationServiceTest {
         assertEquals("USER", captor.getValue().getReceiverType());
         assertEquals(0L, captor.getValue().getReceiverId());
         assertEquals("SENT", outcome.emailStatus());
-        verify(merchantService, never()).getDetail(any());
+        verify(configApi, never()).find(any());
     }
 
     /** 平台邮箱未配置：站内信照发，邮件记 SKIPPED。 */
@@ -166,11 +164,7 @@ class NotificationServiceTest {
     }
 
     private void stubMerchantEmail(String email) {
-        Merchant merchant = new Merchant();
-        merchant.setId(1L);
-        merchant.setContactEmail(email);
-        when(merchantService.getDetail(1L))
-                .thenReturn(new MerchantDetailResponse(MerchantResponse.from(merchant), List.of()));
+        when(configApi.find(1L)).thenReturn(Optional.of(new NotifyConfig(null, email, null)));
     }
 
     private static NotificationTemplate template() {

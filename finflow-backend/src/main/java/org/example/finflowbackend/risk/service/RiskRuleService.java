@@ -2,14 +2,16 @@ package org.example.finflowbackend.risk.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import org.example.finflowbackend.audit.AuditRecorder;
+import org.example.finflowbackend.audit.api.AuditApi;
 import org.example.finflowbackend.common.api.PageResponse;
 import org.example.finflowbackend.common.exception.BusinessException;
 import org.example.finflowbackend.risk.RiskErrorCode;
 import org.example.finflowbackend.risk.RiskRuleType;
 import org.example.finflowbackend.risk.entity.RiskRule;
+import org.example.finflowbackend.risk.entity.RiskRuleVersion;
 import org.example.finflowbackend.risk.evaluate.RuleEvaluator;
 import org.example.finflowbackend.risk.mapper.RiskRuleMapper;
+import org.example.finflowbackend.risk.mapper.RiskRuleVersionMapper;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,33 +24,39 @@ import java.util.stream.Collectors;
 /**
  * 风控规则管理（S30）：动态增删改 + 启停。
  * 参数合法性在写入时按类型交给对应求值器校验，引擎求值时即可信任库内配置。
+ * M10：每次变更在同一事务内递增 risk_rule.version 并写 risk_rule_version 完整快照（只增不改）。
  */
 @Service
 public class RiskRuleService {
 
     private final RiskRuleMapper ruleMapper;
+    private final RiskRuleVersionMapper versionMapper;
     private final Map<RiskRuleType, RuleEvaluator> evaluators;
     private final ObjectMapper objectMapper;
-    private final AuditRecorder auditRecorder;
+    private final AuditApi auditApi;
 
-    public RiskRuleService(RiskRuleMapper ruleMapper, java.util.List<RuleEvaluator> evaluatorList,
-                           ObjectMapper objectMapper, AuditRecorder auditRecorder) {
+    public RiskRuleService(RiskRuleMapper ruleMapper, RiskRuleVersionMapper versionMapper,
+                           java.util.List<RuleEvaluator> evaluatorList,
+                           ObjectMapper objectMapper, AuditApi auditApi) {
         this.ruleMapper = ruleMapper;
+        this.versionMapper = versionMapper;
         this.evaluators = evaluatorList.stream()
                 .collect(Collectors.toUnmodifiableMap(RuleEvaluator::type, e -> e));
         this.objectMapper = objectMapper;
-        this.auditRecorder = auditRecorder;
+        this.auditApi = auditApi;
     }
 
     @Transactional
     public RiskRule create(RiskRule rule) {
         validate(rule);
         rule.setId(null);
+        rule.setVersion(1);
         try {
             ruleMapper.insert(rule);
         } catch (DuplicateKeyException e) {
             throw new BusinessException(RiskErrorCode.RULE_NAME_EXISTS);
         }
+        recordVersion(rule, RiskRuleVersion.CHANGE_CREATE);
         return rule;
     }
 
@@ -63,13 +71,15 @@ public class RiskRuleService {
         rule.setPriority(incoming.getPriority());
         rule.setEnabled(incoming.getEnabled());
         rule.setRemark(incoming.getRemark());
+        rule.setVersion(nextVersion(rule.getVersion()));
         validate(rule);
         try {
             ruleMapper.updateById(rule);
         } catch (DuplicateKeyException e) {
             throw new BusinessException(RiskErrorCode.RULE_NAME_EXISTS);
         }
-        auditRecorder.submit(before, rule);
+        recordVersion(rule, RiskRuleVersion.CHANGE_UPDATE);
+        auditApi.submit(before, rule);
         return rule;
     }
 
@@ -79,14 +89,19 @@ public class RiskRuleService {
         RiskRule rule = requireRule(id);
         RiskRule before = snapshot(rule);
         rule.setEnabled(enabled);
+        rule.setVersion(nextVersion(rule.getVersion()));
         ruleMapper.updateById(rule);
-        auditRecorder.submit(before, rule);
+        recordVersion(rule, RiskRuleVersion.CHANGE_TOGGLE);
+        auditApi.submit(before, rule);
         return rule;
     }
 
     @Transactional
     public void delete(Long id) {
-        requireRule(id);
+        RiskRule rule = requireRule(id);
+        // 删除也是一次变更：先留一行 DELETE 快照（版本号再 +1），再删活动规则；历史永久保留
+        rule.setVersion(nextVersion(rule.getVersion()));
+        recordVersion(rule, RiskRuleVersion.CHANGE_DELETE);
         ruleMapper.deleteById(id);
     }
 
@@ -138,6 +153,26 @@ public class RiskRuleService {
         return rule;
     }
 
+    private static int nextVersion(Integer current) {
+        return current == null ? 1 : current + 1;
+    }
+
+    /** 写一行完整快照（与规则变更同一事务）；created_at 由库默认值填充。 */
+    private void recordVersion(RiskRule rule, String changeType) {
+        RiskRuleVersion version = new RiskRuleVersion();
+        version.setRuleId(rule.getId());
+        version.setVersion(rule.getVersion());
+        version.setRuleName(rule.getRuleName());
+        version.setRuleType(rule.getRuleType());
+        version.setParams(rule.getParams());
+        version.setScore(rule.getScore());
+        version.setPriority(rule.getPriority());
+        version.setEnabled(rule.getEnabled());
+        version.setRemark(rule.getRemark());
+        version.setChangeType(changeType);
+        versionMapper.insert(version);
+    }
+
     /** 审计改前快照：浅拷贝一份，避免原实体原地修改污染 before 值。 */
     private static RiskRule snapshot(RiskRule rule) {
         RiskRule copy = new RiskRule();
@@ -149,6 +184,7 @@ public class RiskRuleService {
         copy.setPriority(rule.getPriority());
         copy.setEnabled(rule.getEnabled());
         copy.setRemark(rule.getRemark());
+        copy.setVersion(rule.getVersion());
         copy.setCreatedAt(rule.getCreatedAt());
         copy.setUpdatedAt(rule.getUpdatedAt());
         return copy;

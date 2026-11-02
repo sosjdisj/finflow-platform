@@ -14,7 +14,7 @@ import java.time.LocalDateTime;
  */
 @Getter
 @Setter
-@TableName("notification_template")
+@TableName(value = "notification_template", schema = "finflow_notify")
 public class NotificationTemplate {
 
     @TableId(type = IdType.AUTO)

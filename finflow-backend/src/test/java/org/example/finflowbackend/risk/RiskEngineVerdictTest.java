@@ -1,22 +1,25 @@
 package org.example.finflowbackend.risk;
 
-import org.example.finflowbackend.common.event.DomainEvent;
 import org.example.finflowbackend.common.event.DomainEventPublisher;
-import org.example.finflowbackend.payment.risk.RiskCheckContext;
+import org.example.finflowbackend.contract.DomainEvent;
+import org.example.finflowbackend.contract.EventTopics;
+import org.example.finflowbackend.contract.EventTypes;
+import org.example.finflowbackend.contract.RiskInterceptedPayload;
+import org.example.finflowbackend.risk.api.RiskDecisionRequest;
+import org.example.finflowbackend.risk.api.RiskDecisionResponse;
+import org.example.finflowbackend.risk.api.RiskVerdict;
 import org.example.finflowbackend.risk.entity.RiskEvent;
 import org.example.finflowbackend.risk.entity.RiskRule;
 import org.example.finflowbackend.risk.evaluate.AmountLimitEvaluator;
 import org.example.finflowbackend.risk.evaluate.BlacklistEvaluator;
-import org.example.finflowbackend.risk.event.RiskInterceptedPayload;
-import org.example.finflowbackend.risk.event.RiskTopics;
 import org.example.finflowbackend.risk.mapper.RiskBlacklistMapper;
 import org.example.finflowbackend.risk.mapper.RiskEventMapper;
 import org.example.finflowbackend.risk.mapper.RiskRuleMapper;
+import org.example.finflowbackend.common.tunable.TunableConfig;
 import org.example.finflowbackend.risk.service.RiskEngine;
-import org.example.finflowbackend.system.config.ConfigKeys;
-import org.example.finflowbackend.system.service.ConfigService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.mock.env.MockEnvironment;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.List;
@@ -40,28 +43,29 @@ class RiskEngineVerdictTest {
     private final RiskRuleMapper ruleMapper = mock(RiskRuleMapper.class);
     private final RiskEventMapper eventMapper = mock(RiskEventMapper.class);
     private final RiskBlacklistMapper blacklistMapper = mock(RiskBlacklistMapper.class);
-    private final ConfigService configService = mock(ConfigService.class);
+    private final MockEnvironment environment = new MockEnvironment();
+    private final TunableConfig tunables = new TunableConfig(environment);
     private final DomainEventPublisher eventPublisher = mock(DomainEventPublisher.class);
 
     private RiskEngine engine() {
         return new RiskEngine(ruleMapper, eventMapper,
                 List.of(new AmountLimitEvaluator(), new BlacklistEvaluator(blacklistMapper)),
-                configService, new ObjectMapper(), eventPublisher);
+                tunables, new ObjectMapper(), eventPublisher);
     }
 
-    /** S37：阈值走配置中心，测试沿用 30/60 默认档。 */
+    /** M14：阈值从配置中心（Environment）读取，测试按 30/60 默认档写入。 */
     private void stubThresholds(long review, long reject) {
-        when(configService.getLong(ConfigKeys.RISK_REVIEW_THRESHOLD)).thenReturn(review);
-        when(configService.getLong(ConfigKeys.RISK_REJECT_THRESHOLD)).thenReturn(reject);
+        environment.setProperty(TunableConfig.RISK_REVIEW, String.valueOf(review));
+        environment.setProperty(TunableConfig.RISK_REJECT, String.valueOf(reject));
     }
 
     @Test
     void scoreBelowReviewThresholdAllows() {
         stubThresholds(30, 60);
         stubRules(rule("A", 29));
-        RiskCheckContext.Decision decision = engine().check(context(1_000_001L));
+        RiskDecisionResponse decision = engine().evaluate(context(1_000_001L));
 
-        assertEquals(RiskCheckContext.Verdict.ALLOW, decision.verdict());
+        assertEquals(RiskVerdict.ALLOW, decision.verdict());
         assertNull(decision.reason());
         assertEvent(29, "ALLOW", 1);
     }
@@ -70,9 +74,9 @@ class RiskEngineVerdictTest {
     void scoreAtReviewThresholdSendsToReview() {
         stubThresholds(30, 60);
         stubRules(rule("A", 30));
-        RiskCheckContext.Decision decision = engine().check(context(1_000_001L));
+        RiskDecisionResponse decision = engine().evaluate(context(1_000_001L));
 
-        assertEquals(RiskCheckContext.Verdict.REVIEW, decision.verdict());
+        assertEquals(RiskVerdict.REVIEW, decision.verdict());
         assertTrue(decision.reason().contains("审核阈值"));
         assertEvent(30, "REVIEW", 1);
     }
@@ -81,21 +85,23 @@ class RiskEngineVerdictTest {
     void scoreAccumulatesAcrossRulesToReject() {
         stubThresholds(30, 60);
         stubRules(rule("A", 30), rule("B", 30));
-        RiskCheckContext.Decision decision = engine().check(context(1_000_001L));
+        RiskDecisionResponse decision = engine().evaluate(context(1_000_001L));
 
-        assertEquals(RiskCheckContext.Verdict.REJECT, decision.verdict());
+        assertEquals(RiskVerdict.REJECT, decision.verdict());
         assertTrue(decision.reason().contains("拒绝阈值"));
         assertEvent(60, "REJECT", 2);
     }
 
-    /** S37 验收锚点：阈值改配置即生效（30/10 下总分 20 达拒绝档）。 */
+    /** M14 验收锚点：引擎不缓存阈值，配置中心改值后下一次决策立即生效（无需重启）。 */
     @Test
-    void thresholdsFollowConfigChange() {
-        stubThresholds(10, 20);
+    void thresholdsFollowConfigChangeWithoutRestart() {
         stubRules(rule("A", 20));
-        RiskCheckContext.Decision decision = engine().check(context(1_000_001L));
+        stubThresholds(10, 20);
+        RiskEngine engine = engine();
+        assertEquals(RiskVerdict.REJECT, engine.evaluate(context(1_000_001L)).verdict());
 
-        assertEquals(RiskCheckContext.Verdict.REJECT, decision.verdict());
+        stubThresholds(30, 60);
+        assertEquals(RiskVerdict.ALLOW, engine.evaluate(context(1_000_001L)).verdict());
     }
 
     @Test
@@ -106,10 +112,10 @@ class RiskEngineVerdictTest {
         blacklist.setRuleType("BLACKLIST");
         blacklist.setParams("{\"dimension\": \"USER\"}");
         stubRules(blacklist, rule("A", 30));
-        RiskCheckContext.Decision decision = engine().check(context(1_000_001L));
+        RiskDecisionResponse decision = engine().evaluate(context(1_000_001L));
 
         // 直接拒绝且短路：拒绝原因带规则名，事件只留黑名单一条命中
-        assertEquals(RiskCheckContext.Verdict.REJECT, decision.verdict());
+        assertEquals(RiskVerdict.REJECT, decision.verdict());
         assertTrue(decision.reason().startsWith("黑名单"));
         ArgumentCaptor<RiskEvent> captor = ArgumentCaptor.forClass(RiskEvent.class);
         verify(eventMapper).insert((RiskEvent) captor.capture());
@@ -123,25 +129,27 @@ class RiskEngineVerdictTest {
     void interceptPublishesEventButAllowDoesNot() {
         stubThresholds(30, 60);
         stubRules(rule("A", 29));
-        engine().check(context(1_000_001L));
+        engine().evaluate(context(1_000_001L));
         verify(eventPublisher, never()).publish(any(), any(), any());
 
         stubRules(rule("A", 30));
-        engine().check(context(1_000_001L));
+        engine().evaluate(context(1_000_001L));
 
         ArgumentCaptor<DomainEvent> captor = ArgumentCaptor.forClass(DomainEvent.class);
-        verify(eventPublisher).publish(eq(RiskTopics.TOPIC_INTERCEPTED), eq("7"), captor.capture());
-        assertEquals(RiskTopics.TYPE_RISK_INTERCEPTED, captor.getValue().eventType());
+        verify(eventPublisher).publish(eq(EventTopics.RISK_INTERCEPTED), eq("7"), captor.capture());
+        assertEquals(EventTypes.RISK_INTERCEPTED, captor.getValue().eventType());
         RiskInterceptedPayload payload = new ObjectMapper().convertValue(
                 captor.getValue().payload(), RiskInterceptedPayload.class);
         assertEquals("REVIEW", payload.verdict());
         assertEquals(30, payload.totalScore());
         assertTrue(payload.reason().contains("审核阈值"));
         assertEquals(1L, payload.merchantId());
+        // M16：拦截事件随 payload 带平台单号，通知服务无需回查订单即可渲染
+        assertEquals("PO2026001", payload.platformOrderNo());
     }
 
-    private RiskCheckContext context(long amount) {
-        return new RiskCheckContext(7L, 1L, amount, "ALIPAY", "10.0.0.1", null);
+    private RiskDecisionRequest context(long amount) {
+        return new RiskDecisionRequest(7L, 1L, amount, "10.0.0.1", null, "PO2026001");
     }
 
     private RiskRule rule(String name, int score) {

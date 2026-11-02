@@ -1,15 +1,15 @@
 package org.example.finflowbackend.ledger.event;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import org.example.finflowbackend.account.AccountOwnerType;
-import org.example.finflowbackend.account.entity.Account;
+import org.example.finflowbackend.account.api.AccountOwnerType;
+import org.example.finflowbackend.account.api.AccountSnapshot;
 import org.example.finflowbackend.account.service.AccountService;
-import org.example.finflowbackend.common.event.DomainEvent;
+import org.example.finflowbackend.contract.DomainEvent;
+import org.example.finflowbackend.contract.EventTypes;
+import org.example.finflowbackend.contract.PaymentSucceededPayload;
 import org.example.finflowbackend.ledger.entity.AccountLedger;
 import org.example.finflowbackend.ledger.mapper.AccountLedgerMapper;
 import org.example.finflowbackend.ledger.service.LedgerService;
-import org.example.finflowbackend.payment.event.PaymentSucceededPayload;
-import org.example.finflowbackend.payment.event.PaymentTopics;
 import org.example.finflowbackend.support.IntegrationTestBase;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -59,13 +59,13 @@ class PaymentLedgerIntegrationTest extends IntegrationTestBase {
     void consumePaymentSucceededCreditsPlatformAccount() {
         String orderNo = "PLT" + Long.toHexString(System.nanoTime());
         long amount = 777L;
-        Account platform = accountService.getOrCreate(AccountOwnerType.PLATFORM, 0L, "CNY");
-        long beforeBalance = platform.getAvailableBalance();
+        AccountSnapshot platform = accountService.getOrCreate(AccountOwnerType.PLATFORM, 0L, "CNY");
+        long beforeBalance = platform.availableBalance();
 
         consumer.handle(message(UUID.randomUUID().toString(), orderNo, amount, "CNY"));
 
         assertEquals(beforeBalance + amount,
-                accountService.getAccount(platform.getId()).getAvailableBalance());
+                accountService.getAccount(platform.id()).getAvailableBalance());
         AccountLedger ledger = ledgerMapper.selectOne(new LambdaQueryWrapper<AccountLedger>()
                 .eq(AccountLedger::getBizType, "PAYMENT")
                 .eq(AccountLedger::getBizNo, orderNo));
@@ -79,32 +79,32 @@ class PaymentLedgerIntegrationTest extends IntegrationTestBase {
     void duplicateDeliveryDoesNotDoubleCredit() {
         String eventId = UUID.randomUUID().toString();
         String orderNo = "PLT" + Long.toHexString(System.nanoTime());
-        Account platform = accountService.getOrCreate(AccountOwnerType.PLATFORM, 0L, "CNY");
-        long beforeBalance = platform.getAvailableBalance();
+        AccountSnapshot platform = accountService.getOrCreate(AccountOwnerType.PLATFORM, 0L, "CNY");
+        long beforeBalance = platform.availableBalance();
 
         // 同一事件投递两次：第二次被 Redis 去重跳过
         consumer.handle(message(eventId, orderNo, 500L, "CNY"));
         consumer.handle(message(eventId, orderNo, 500L, "CNY"));
         assertEquals(1L, countLedger(orderNo));
         assertEquals(beforeBalance + 500L,
-                accountService.getAccount(platform.getId()).getAvailableBalance());
+                accountService.getAccount(platform.id()).getAvailableBalance());
 
         // 绕过 Redis 去重窗口的重投（删去重键后再投）：流水表 uk 兜底，仍不重复入账
         redisTemplate.delete(DEDUP_KEY_PREFIX + eventId);
         consumer.handle(message(eventId, orderNo, 500L, "CNY"));
         assertEquals(1L, countLedger(orderNo));
         assertEquals(beforeBalance + 500L,
-                accountService.getAccount(platform.getId()).getAvailableBalance());
+                accountService.getAccount(platform.id()).getAvailableBalance());
     }
 
     @Test
     void consistencyCheckDetectsBalanceMismatch() {
         Long ownerId = System.nanoTime();
-        Account account = accountService.getOrCreate(AccountOwnerType.MERCHANT, ownerId, "CNY");
-        ledgerService.credit(account.getId(), "PAYMENT", "CK-A-" + ownerId, 300L, "TEST");
-        ledgerService.credit(account.getId(), "PAYMENT", "CK-B-" + ownerId, 200L, "TEST");
+        AccountSnapshot account = accountService.getOrCreate(AccountOwnerType.MERCHANT, ownerId, "CNY");
+        ledgerService.credit(account.id(), "PAYMENT", "CK-A-" + ownerId, 300L, "TEST");
+        ledgerService.credit(account.id(), "PAYMENT", "CK-B-" + ownerId, 200L, "TEST");
 
-        var result = ledgerService.consistencyCheck(account.getId());
+        var result = ledgerService.consistencyCheck(account.id());
         assertEquals(500L, result.currentBalance());
         assertEquals(500L, result.ledgerSum());
         assertTrue(result.consistent());
@@ -112,15 +112,16 @@ class PaymentLedgerIntegrationTest extends IntegrationTestBase {
         // 人为改坏余额，校验必须能发现账实不符
         jdbcTemplate.update(
                 "UPDATE account SET available_balance = available_balance + 1 WHERE id = ?",
-                account.getId());
-        var broken = ledgerService.consistencyCheck(account.getId());
+                account.id());
+        var broken = ledgerService.consistencyCheck(account.id());
         assertEquals(501L, broken.currentBalance());
         assertFalse(broken.consistent());
     }
 
     private String message(String eventId, String orderNo, long amount, String currency) {
-        DomainEvent event = new DomainEvent(eventId, PaymentTopics.TYPE_SUCCEEDED, Instant.now(),
-                new PaymentSucceededPayload(1L, orderNo, amount, currency, LocalDateTime.now()));
+        DomainEvent event = new DomainEvent(eventId, EventTypes.PAYMENT_SUCCEEDED, Instant.now(),
+                DomainEvent.CURRENT_VERSION,
+                new PaymentSucceededPayload(1L, 1L, orderNo, amount, currency, LocalDateTime.now()));
         return objectMapper.writeValueAsString(event);
     }
 

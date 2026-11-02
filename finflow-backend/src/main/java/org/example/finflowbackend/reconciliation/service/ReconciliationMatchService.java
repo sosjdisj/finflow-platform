@@ -1,23 +1,28 @@
 package org.example.finflowbackend.reconciliation.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import org.example.finflowbackend.common.event.DomainEvent;
+import org.example.finflowbackend.channel.api.PaymentTransactionApi;
 import org.example.finflowbackend.common.event.DomainEventPublisher;
 import org.example.finflowbackend.common.exception.BusinessException;
+import org.example.finflowbackend.contract.DomainEvent;
+import org.example.finflowbackend.contract.EventTopics;
+import org.example.finflowbackend.contract.EventTypes;
+import org.example.finflowbackend.contract.ReconciliationAbnormalPayload;
 import org.example.finflowbackend.reconciliation.ReconciliationErrorCode;
 import org.example.finflowbackend.reconciliation.ReconciliationStatus;
 import org.example.finflowbackend.reconciliation.dto.MatchSummaryResponse;
+import org.example.finflowbackend.reconciliation.dto.MissingInChannelCandidate;
 import org.example.finflowbackend.reconciliation.entity.ReconciliationRecord;
 import org.example.finflowbackend.reconciliation.entity.ReconciliationTask;
-import org.example.finflowbackend.reconciliation.event.ReconciliationAbnormalPayload;
-import org.example.finflowbackend.reconciliation.event.ReconciliationTopics;
 import org.example.finflowbackend.reconciliation.mapper.ReconciliationMatchMapper;
 import org.example.finflowbackend.reconciliation.mapper.ReconciliationRecordMapper;
 import org.example.finflowbackend.reconciliation.mapper.ReconciliationTaskMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -33,15 +38,18 @@ public class ReconciliationMatchService {
     private final ReconciliationTaskMapper taskMapper;
     private final ReconciliationRecordMapper recordMapper;
     private final ReconciliationMatchMapper matchMapper;
+    private final PaymentTransactionApi paymentTransactionApi;
     private final DomainEventPublisher eventPublisher;
 
     public ReconciliationMatchService(ReconciliationTaskMapper taskMapper,
                                       ReconciliationRecordMapper recordMapper,
                                       ReconciliationMatchMapper matchMapper,
+                                      PaymentTransactionApi paymentTransactionApi,
                                       DomainEventPublisher eventPublisher) {
         this.taskMapper = taskMapper;
         this.recordMapper = recordMapper;
         this.matchMapper = matchMapper;
+        this.paymentTransactionApi = paymentTransactionApi;
         this.eventPublisher = eventPublisher;
     }
 
@@ -57,7 +65,8 @@ public class ReconciliationMatchService {
         }
 
         matchMapper.deleteByTaskId(taskId);
-        matchMapper.insertMatchResults(taskId, task.getBillDate(), task.getChannelCode());
+        matchMapper.insertMatchResults(taskId);
+        insertMissingInChannel(taskId, task.getBillDate(), task.getChannelCode());
 
         long matched = count(taskId, ReconciliationRecord.MATCHED);
         long amountMismatch = count(taskId, ReconciliationRecord.AMOUNT_MISMATCH);
@@ -79,6 +88,30 @@ public class ReconciliationMatchService {
                 matched, amountMismatch, statusMismatch, missingInPlatform, missingInChannel,
                 matched + amountMismatch + statusMismatch + missingInPlatform + missingInChannel,
                 task.getMatchedAt());
+    }
+
+    /**
+     * 平台当日成功单未出现在账单中 → MISSING_IN_CHANNEL。
+     * 渠道交互留痕在 finflow_channel（M07），归属判定走 channel.api，不在主库 SQL 里跨 schema 读表。
+     */
+    private void insertMissingInChannel(Long taskId, LocalDate billDate, String channelCode) {
+        List<MissingInChannelCandidate> candidates =
+                matchMapper.selectMissingInChannelCandidates(taskId, billDate);
+        if (candidates.isEmpty()) {
+            return;
+        }
+        Map<Long, String> channelOrderNos = paymentTransactionApi.findChannelOrderNos(
+                candidates.stream().map(MissingInChannelCandidate::getOrderId).toList(), channelCode);
+        List<MissingInChannelCandidate> records = new ArrayList<>();
+        for (MissingInChannelCandidate candidate : candidates) {
+            if (channelOrderNos.containsKey(candidate.getOrderId())) {
+                candidate.setChannelOrderNo(channelOrderNos.get(candidate.getOrderId()));
+                records.add(candidate);
+            }
+        }
+        if (!records.isEmpty()) {
+            matchMapper.insertMissingInChannelRecords(taskId, records);
+        }
     }
 
     private long count(Long taskId, String result) {
@@ -103,9 +136,9 @@ public class ReconciliationMatchService {
             agg[1] += record.getPlatformAmount() == null ? 0 : record.getPlatformAmount();
             agg[2] += record.getBillAmount() == null ? 0 : record.getBillAmount();
         }
-        aggregated.forEach((result, agg) -> eventPublisher.publish(ReconciliationTopics.TOPIC_ABNORMAL,
+        aggregated.forEach((result, agg) -> eventPublisher.publish(EventTopics.RECONCILIATION_ABNORMAL,
                 String.valueOf(task.getId()),
-                DomainEvent.of(ReconciliationTopics.TYPE_RECONCILIATION_DIFFERENCE,
+                DomainEvent.of(EventTypes.RECONCILIATION_DIFFERENCE,
                         new ReconciliationAbnormalPayload(task.getId(), task.getTaskNo(), task.getBillDate(),
                                 task.getChannelCode(), result, agg[1], agg[2], agg[0]))));
     }

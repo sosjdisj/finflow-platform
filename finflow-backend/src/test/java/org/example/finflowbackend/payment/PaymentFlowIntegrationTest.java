@@ -1,7 +1,7 @@
 package org.example.finflowbackend.payment;
 
-import org.example.finflowbackend.payment.dto.PaymentOrderCreateRequest;
-import org.example.finflowbackend.payment.dto.PaymentOrderResponse;
+import org.example.finflowbackend.payment.api.PaymentOrderCreateRequest;
+import org.example.finflowbackend.payment.api.PaymentOrderResponse;
 import org.example.finflowbackend.payment.service.PaymentProcessService;
 import org.example.finflowbackend.payment.task.PaymentOrderCloseTask;
 import org.example.finflowbackend.support.FakeChannelStub;

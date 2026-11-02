@@ -1,8 +1,7 @@
 package org.example.finflowbackend.settlement;
 
-import com.baomidou.mybatisplus.core.conditions.Wrapper;
-import org.example.finflowbackend.clearing.entity.ClearingOrder;
-import org.example.finflowbackend.clearing.mapper.ClearingOrderMapper;
+import org.example.finflowbackend.clearing.api.ClearingOrderSnapshot;
+import org.example.finflowbackend.clearing.api.ClearingQueryApi;
 import org.example.finflowbackend.common.lock.RedisLockService;
 import org.example.finflowbackend.settlement.service.SettlementGenerateService;
 import org.example.finflowbackend.settlement.service.SettlementOrderWriter;
@@ -28,17 +27,17 @@ class SettlementGenerateServiceTest {
 
     private static final LocalDate DATE = LocalDate.of(2026, 10, 17);
 
-    private ClearingOrderMapper clearingOrderMapper;
+    private ClearingQueryApi clearingQueryApi;
     private SettlementOrderWriter orderWriter;
     private RedisLockService redisLockService;
     private SettlementGenerateService service;
 
     @BeforeEach
     void setUp() {
-        clearingOrderMapper = mock(ClearingOrderMapper.class);
+        clearingQueryApi = mock(ClearingQueryApi.class);
         orderWriter = mock(SettlementOrderWriter.class);
         redisLockService = mock(RedisLockService.class);
-        service = new SettlementGenerateService(clearingOrderMapper, orderWriter, redisLockService);
+        service = new SettlementGenerateService(clearingQueryApi, orderWriter, redisLockService);
     }
 
     @Test
@@ -48,7 +47,7 @@ class SettlementGenerateServiceTest {
             ((Supplier<Integer>) inv.getArgument(2)).get();
             return 2;
         });
-        when(clearingOrderMapper.selectList(any(Wrapper.class))).thenReturn(List.of(
+        when(clearingQueryApi.listClearedBySettleDate(DATE)).thenReturn(List.of(
                 clearing(1L, 10L, 3000L), clearing(2L, 10L, 2000L), clearing(3L, 11L, 5000L)));
         when(orderWriter.generateOne(eq(10L), eq(DATE), any())).thenReturn(true);
         when(orderWriter.generateOne(eq(11L), eq(DATE), any())).thenReturn(true);
@@ -67,7 +66,7 @@ class SettlementGenerateServiceTest {
             ((Supplier<Integer>) inv.getArgument(2)).get();
             return 0;
         });
-        when(clearingOrderMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(clearingQueryApi.listClearedBySettleDate(DATE)).thenReturn(List.of());
 
         int generated = service.generateFor(DATE);
 
@@ -82,23 +81,12 @@ class SettlementGenerateServiceTest {
         int generated = service.generateFor(DATE);
 
         assertEquals(0, generated);
-        verify(clearingOrderMapper, never()).selectList(any());
+        verify(clearingQueryApi, never()).listClearedBySettleDate(any());
         verify(orderWriter, never()).generateOne(any(), any(), any());
     }
 
-    private ClearingOrder clearing(long id, long merchantId, long merchantIncome) {
-        ClearingOrder clearing = new ClearingOrder();
-        clearing.setId(id);
-        clearing.setOrderId(1000L + id);
-        clearing.setMerchantId(merchantId);
-        clearing.setPayAmount(merchantIncome + 100);
-        clearing.setMerchantIncome(merchantIncome);
-        clearing.setPlatformFee(50L);
-        clearing.setChannelCost(50L);
-        clearing.setCurrency("CNY");
-        clearing.setChannelCode("MOCK_WALLET");
-        clearing.setSettleDate(DATE);
-        clearing.setStatus("CLEARED");
-        return clearing;
+    private ClearingOrderSnapshot clearing(long id, long merchantId, long merchantIncome) {
+        return new ClearingOrderSnapshot(id, 1000L + id, merchantId, merchantIncome + 100,
+                merchantIncome, "CNY");
     }
 }

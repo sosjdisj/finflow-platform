@@ -5,9 +5,9 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import org.example.finflowbackend.auth.token.CurrentUser;
+import org.example.finflowbackend.common.context.CurrentUser;
 import org.example.finflowbackend.auth.token.JwtTokenProvider;
-import org.example.finflowbackend.system.service.RbacAuthorityService;
+import org.example.finflowbackend.system.api.RbacAuthorityApi;
 import org.springframework.http.HttpHeaders;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -29,11 +29,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private static final String BEARER_PREFIX = "Bearer ";
 
     private final JwtTokenProvider tokenProvider;
-    private final RbacAuthorityService rbacAuthorityService;
+    private final RbacAuthorityApi rbacAuthorityApi;
 
-    public JwtAuthenticationFilter(JwtTokenProvider tokenProvider, RbacAuthorityService rbacAuthorityService) {
+    public JwtAuthenticationFilter(JwtTokenProvider tokenProvider, RbacAuthorityApi rbacAuthorityApi) {
         this.tokenProvider = tokenProvider;
-        this.rbacAuthorityService = rbacAuthorityService;
+        this.rbacAuthorityApi = rbacAuthorityApi;
     }
 
     @Override
@@ -43,7 +43,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         if (header != null && header.startsWith(BEARER_PREFIX)) {
             try {
                 CurrentUser user = tokenProvider.parseAccessToken(header.substring(BEARER_PREFIX.length()));
-                List<SimpleGrantedAuthority> authorities = rbacAuthorityService
+                List<SimpleGrantedAuthority> authorities = rbacAuthorityApi
                         .loadPermissionCodes(user.userId())
                         .stream()
                         .map(SimpleGrantedAuthority::new)

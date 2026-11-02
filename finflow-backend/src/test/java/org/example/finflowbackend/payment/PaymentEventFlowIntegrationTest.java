@@ -5,9 +5,10 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.serialization.StringDeserializer;
-import org.example.finflowbackend.payment.dto.PaymentOrderCreateRequest;
-import org.example.finflowbackend.payment.dto.PaymentOrderResponse;
-import org.example.finflowbackend.payment.event.PaymentTopics;
+import org.example.finflowbackend.contract.EventTopics;
+import org.example.finflowbackend.contract.EventTypes;
+import org.example.finflowbackend.payment.api.PaymentOrderCreateRequest;
+import org.example.finflowbackend.payment.api.PaymentOrderResponse;
 import org.example.finflowbackend.payment.service.PaymentProcessService;
 import org.example.finflowbackend.support.IntegrationTestBase;
 import org.junit.jupiter.api.BeforeEach;
@@ -27,7 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * S16 事件链路验收（依赖本地 MySQL、Redis 与 Kafka 容器，S39 换 Testcontainers）：
- * 支付全链路（建单→受理→回调成功）后，finflow.payment.created 与 finflow.payment.succeeded
+ * 支付全链路（建单→受理→回调成功）后，EventTopics 的 created 与 succeeded
  * 两个主题各发布一条领域事件，事件带唯一 eventId 供消费端幂等去重。
  */
 class PaymentEventFlowIntegrationTest extends IntegrationTestBase {
@@ -59,7 +60,7 @@ class PaymentEventFlowIntegrationTest extends IntegrationTestBase {
     @Test
     void paymentFlowPublishesCreatedAndSucceededEvents() throws Exception {
         try (KafkaConsumer<String, String> consumer = new KafkaConsumer<>(consumerProps())) {
-            consumer.subscribe(List.of(PaymentTopics.TOPIC_CREATED, PaymentTopics.TOPIC_SUCCEEDED));
+            consumer.subscribe(List.of(EventTopics.PAYMENT_CREATED, EventTopics.PAYMENT_SUCCEEDED));
             // 订阅就位后再触发链路，避免漏收
             Thread.sleep(1000);
 
@@ -69,14 +70,14 @@ class PaymentEventFlowIntegrationTest extends IntegrationTestBase {
             // it 库 topic 含历史轮次事件；一次收集全部（同一 consumer 二次 poll 会丢已拉记录），再按本订单匹配
             List<ConsumerRecord<String, String>> all = pollAll(consumer, 15);
             var created = all.stream()
-                    .filter(r -> r.topic().equals(PaymentTopics.TOPIC_CREATED) && hasOrderId(r.value(), orderId))
+                    .filter(r -> r.topic().equals(EventTopics.PAYMENT_CREATED) && hasOrderId(r.value(), orderId))
                     .findFirst().orElseThrow(() -> new AssertionError("未收到本订单的 PaymentCreated 事件"));
             var succeeded = all.stream()
-                    .filter(r -> r.topic().equals(PaymentTopics.TOPIC_SUCCEEDED) && hasOrderId(r.value(), orderId))
+                    .filter(r -> r.topic().equals(EventTopics.PAYMENT_SUCCEEDED) && hasOrderId(r.value(), orderId))
                     .findFirst().orElseThrow(() -> new AssertionError("未收到本订单的 PaymentSucceeded 事件"));
 
-            assertEvent(created.value(), PaymentTopics.TYPE_CREATED, orderId);
-            assertEvent(succeeded.value(), PaymentTopics.TYPE_SUCCEEDED, orderId);
+            assertEvent(created.value(), EventTypes.PAYMENT_CREATED, orderId);
+            assertEvent(succeeded.value(), EventTypes.PAYMENT_SUCCEEDED, orderId);
             // 分区 key = orderId，同单事件有序
             assertEquals(String.valueOf(orderId), created.key());
         }

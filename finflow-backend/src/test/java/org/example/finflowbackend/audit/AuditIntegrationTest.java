@@ -1,10 +1,10 @@
 package org.example.finflowbackend.audit;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import org.example.finflowbackend.audit.annotation.Audited;
+import org.example.finflowbackend.audit.api.Audited;
 import org.example.finflowbackend.audit.entity.AuditLog;
 import org.example.finflowbackend.audit.mapper.AuditLogMapper;
-import org.example.finflowbackend.auth.token.CurrentUser;
+import org.example.finflowbackend.common.context.CurrentUser;
 import org.example.finflowbackend.support.IntegrationTestBase;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;

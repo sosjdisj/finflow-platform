@@ -2,6 +2,7 @@ package org.example.finflowbackend.system.file;
 
 import org.example.finflowbackend.common.exception.BusinessException;
 import org.example.finflowbackend.system.SystemErrorCode;
+import org.example.finflowbackend.system.api.file.FileObjectResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;

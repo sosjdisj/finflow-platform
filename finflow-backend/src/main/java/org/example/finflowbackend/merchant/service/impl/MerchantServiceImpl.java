@@ -2,21 +2,22 @@ package org.example.finflowbackend.merchant.service.impl;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import org.example.finflowbackend.auth.web.CurrentUserHolder;
+import org.example.finflowbackend.common.context.CurrentUserHolder;
 import org.example.finflowbackend.common.api.ErrorCode;
 import org.example.finflowbackend.common.api.PageResponse;
 import org.example.finflowbackend.common.exception.BusinessException;
 import org.example.finflowbackend.merchant.MerchantErrorCode;
-import org.example.finflowbackend.merchant.MerchantStatus;
+import org.example.finflowbackend.merchant.api.MerchantStatus;
 import org.example.finflowbackend.merchant.dto.MerchantCreateRequest;
-import org.example.finflowbackend.merchant.dto.MerchantDetailResponse;
-import org.example.finflowbackend.merchant.dto.MerchantResponse;
+import org.example.finflowbackend.merchant.api.MerchantDetailResponse;
+import org.example.finflowbackend.merchant.api.MerchantResponse;
 import org.example.finflowbackend.merchant.dto.MerchantReviewRequest;
 import org.example.finflowbackend.merchant.dto.MerchantStatusChangeRequest;
-import org.example.finflowbackend.merchant.dto.MerchantStatusLogResponse;
+import org.example.finflowbackend.merchant.api.MerchantStatusLogResponse;
 import org.example.finflowbackend.merchant.dto.MerchantUpdateRequest;
 import org.example.finflowbackend.merchant.entity.Merchant;
 import org.example.finflowbackend.merchant.entity.MerchantStatusLog;
+import org.example.finflowbackend.merchant.event.MerchantNotifyConfigPublisher;
 import org.example.finflowbackend.merchant.mapper.MerchantMapper;
 import org.example.finflowbackend.merchant.mapper.MerchantStatusLogMapper;
 import org.example.finflowbackend.merchant.service.MerchantService;
@@ -41,10 +42,13 @@ public class MerchantServiceImpl implements MerchantService {
 
     private final MerchantMapper merchantMapper;
     private final MerchantStatusLogMapper statusLogMapper;
+    private final MerchantNotifyConfigPublisher notifyConfigPublisher;
 
-    public MerchantServiceImpl(MerchantMapper merchantMapper, MerchantStatusLogMapper statusLogMapper) {
+    public MerchantServiceImpl(MerchantMapper merchantMapper, MerchantStatusLogMapper statusLogMapper,
+                               MerchantNotifyConfigPublisher notifyConfigPublisher) {
         this.merchantMapper = merchantMapper;
         this.statusLogMapper = statusLogMapper;
+        this.notifyConfigPublisher = notifyConfigPublisher;
     }
 
     @Override
@@ -102,6 +106,8 @@ public class MerchantServiceImpl implements MerchantService {
         update.setSettleCycle(defaultCycle(request.settleCycle()));
         update.setWebhookUrl(request.webhookUrl());
         merchantMapper.updateById(update);
+        // M16：回调地址 / 邮箱可能已变，发布配置快照给通知服务落投影（无事务时立即发，有事务则提交后发）
+        notifyConfigPublisher.publish(id);
         return MerchantResponse.from(requireMerchant(id));
     }
 

@@ -1,13 +1,14 @@
 package org.example.finflowbackend.ledger.event;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import org.example.finflowbackend.account.AccountOwnerType;
-import org.example.finflowbackend.account.entity.Account;
+import org.example.finflowbackend.account.api.AccountOwnerType;
+import org.example.finflowbackend.account.api.AccountSnapshot;
 import org.example.finflowbackend.account.service.AccountService;
-import org.example.finflowbackend.common.event.DomainEvent;
+import org.example.finflowbackend.contract.DomainEvent;
+import org.example.finflowbackend.contract.EventTypes;
+import org.example.finflowbackend.contract.RefundSucceededPayload;
 import org.example.finflowbackend.ledger.entity.AccountLedger;
 import org.example.finflowbackend.ledger.mapper.AccountLedgerMapper;
-import org.example.finflowbackend.refund.event.RefundTopics;
 import org.example.finflowbackend.support.IntegrationTestBase;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,6 +28,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 class RefundLedgerConsumerTest extends IntegrationTestBase {
 
     private static final String DEDUP_KEY_PREFIX = "event:consumed:finflow-ledger:";
+    /** 平台备付金账户新建时余额为 0，退款冲减前先入账一笔测试资金。 */
+    private static final long SEED_BALANCE = 10000L;
 
     @Autowired
     private RefundLedgerConsumer consumer;
@@ -46,13 +49,13 @@ class RefundLedgerConsumerTest extends IntegrationTestBase {
     @Test
     void consumeRefundSucceededDebitsPlatformAccount() {
         String refundNo = "RPLT" + Long.toHexString(System.nanoTime());
-        Account platform = accountService.getOrCreate(AccountOwnerType.PLATFORM, 0L, "CNY");
-        long beforeBalance = platform.getAvailableBalance();
+        AccountSnapshot platform = fundedPlatformAccount();
+        long beforeBalance = platform.availableBalance();
 
         consumer.handle(message(UUID.randomUUID().toString(), refundNo, 3000L));
 
         assertEquals(beforeBalance - 3000L,
-                accountService.getAccount(platform.getId()).getAvailableBalance());
+                accountService.getAccount(platform.id()).getAvailableBalance());
         AccountLedger ledger = ledgerMapper.selectOne(new LambdaQueryWrapper<AccountLedger>()
                 .eq(AccountLedger::getBizType, "REFUND")
                 .eq(AccountLedger::getBizNo, refundNo));
@@ -65,28 +68,36 @@ class RefundLedgerConsumerTest extends IntegrationTestBase {
     void duplicateDeliveryDoesNotDoubleDebit() {
         String eventId = UUID.randomUUID().toString();
         String refundNo = "RPLT" + Long.toHexString(System.nanoTime());
-        Account platform = accountService.getOrCreate(AccountOwnerType.PLATFORM, 0L, "CNY");
-        long beforeBalance = platform.getAvailableBalance();
+        AccountSnapshot platform = fundedPlatformAccount();
+        long beforeBalance = platform.availableBalance();
 
         consumer.handle(message(eventId, refundNo, 2000L));
         consumer.handle(message(eventId, refundNo, 2000L));
         assertEquals(1L, countLedger(refundNo));
         assertEquals(beforeBalance - 2000L,
-                accountService.getAccount(platform.getId()).getAvailableBalance());
+                accountService.getAccount(platform.id()).getAvailableBalance());
 
         // 绕过 Redis 去重窗口的重投：流水表 uk(biz_type, biz_no, account_id) 兜底
         redisTemplate.delete(DEDUP_KEY_PREFIX + eventId);
         consumer.handle(message(eventId, refundNo, 2000L));
         assertEquals(1L, countLedger(refundNo));
         assertEquals(beforeBalance - 2000L,
-                accountService.getAccount(platform.getId()).getAvailableBalance());
+                accountService.getAccount(platform.id()).getAvailableBalance());
     }
 
     private String message(String eventId, String refundNo, long amount) {
-        DomainEvent event = new DomainEvent(eventId, RefundTopics.TYPE_REFUND_SUCCEEDED, Instant.now(),
-                new org.example.finflowbackend.refund.event.RefundSucceededPayload(
+        DomainEvent event = new DomainEvent(eventId, EventTypes.REFUND_SUCCEEDED, Instant.now(),
+                DomainEvent.CURRENT_VERSION,
+                new RefundSucceededPayload(
                         1L, refundNo, "P20260101000099", 10L, amount, "CNY", LocalDateTime.now()));
         return objectMapper.writeValueAsString(event);
+    }
+
+    /** 平台备付金账户：取用或新建后入账测试资金，返回最新快照。 */
+    private AccountSnapshot fundedPlatformAccount() {
+        AccountSnapshot platform = accountService.getOrCreate(AccountOwnerType.PLATFORM, 0L, "CNY");
+        accountService.credit(platform.id(), SEED_BALANCE);
+        return accountService.getSnapshot(platform.id());
     }
 
     private long countLedger(String refundNo) {

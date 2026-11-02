@@ -1,8 +1,9 @@
 package org.example.finflowbackend.system.file;
 
 import io.swagger.v3.oas.annotations.tags.Tag;
-import org.example.finflowbackend.auth.web.CurrentUserHolder;
 import org.example.finflowbackend.common.api.ApiResponse;
+import org.example.finflowbackend.common.context.CurrentUserHolder;
+import org.example.finflowbackend.system.api.file.FileObjectResponse;
 import org.springframework.core.io.InputStreamResource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;

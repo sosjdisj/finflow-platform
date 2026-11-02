@@ -1,10 +1,10 @@
 package org.example.finflowbackend.merchant.service.impl;
 
 import org.example.finflowbackend.audit.AuditRecorder;
-import org.example.finflowbackend.auth.token.CurrentUser;
+import org.example.finflowbackend.common.context.CurrentUser;
 import org.example.finflowbackend.common.exception.BusinessException;
 import org.example.finflowbackend.merchant.MerchantErrorCode;
-import org.example.finflowbackend.merchant.dto.MerchantDetailResponse;
+import org.example.finflowbackend.merchant.api.MerchantDetailResponse;
 import org.example.finflowbackend.merchant.dto.MerchantRateSetRequest;
 import org.example.finflowbackend.merchant.entity.MerchantRate;
 import org.example.finflowbackend.merchant.entity.MerchantRateLog;

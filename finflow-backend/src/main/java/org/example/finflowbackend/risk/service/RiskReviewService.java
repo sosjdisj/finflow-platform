@@ -1,9 +1,9 @@
 package org.example.finflowbackend.risk.service;
 
-import org.example.finflowbackend.payment.PaymentStatus;
-import org.example.finflowbackend.payment.dto.PaymentOrderResponse;
-import org.example.finflowbackend.payment.service.PaymentOrderService;
-import org.example.finflowbackend.payment.service.PaymentProcessService;
+import org.example.finflowbackend.payment.api.PaymentOrderApi;
+import org.example.finflowbackend.payment.api.PaymentOrderResponse;
+import org.example.finflowbackend.payment.api.PaymentProcessApi;
+import org.example.finflowbackend.payment.api.PaymentStatus;
 import org.example.finflowbackend.risk.RiskErrorCode;
 import org.example.finflowbackend.common.exception.BusinessException;
 import org.springframework.stereotype.Service;
@@ -16,28 +16,28 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class RiskReviewService {
 
-    private final PaymentOrderService paymentOrderService;
-    private final PaymentProcessService paymentProcessService;
+    private final PaymentOrderApi paymentOrderApi;
+    private final PaymentProcessApi paymentProcessApi;
 
-    public RiskReviewService(PaymentOrderService paymentOrderService, PaymentProcessService paymentProcessService) {
-        this.paymentOrderService = paymentOrderService;
-        this.paymentProcessService = paymentProcessService;
+    public RiskReviewService(PaymentOrderApi paymentOrderApi, PaymentProcessApi paymentProcessApi) {
+        this.paymentOrderApi = paymentOrderApi;
+        this.paymentProcessApi = paymentProcessApi;
     }
 
     @Transactional
     public void approve(Long orderId, String operator, String remark) {
         requireReviewOrder(orderId);
-        paymentProcessService.resumeAfterReview(orderId, true, operator, remark);
+        paymentProcessApi.resumeAfterReview(orderId, true, operator, remark);
     }
 
     @Transactional
     public void reject(Long orderId, String operator, String remark) {
         requireReviewOrder(orderId);
-        paymentProcessService.resumeAfterReview(orderId, false, operator, remark);
+        paymentProcessApi.resumeAfterReview(orderId, false, operator, remark);
     }
 
     private void requireReviewOrder(Long orderId) {
-        PaymentOrderResponse order = paymentOrderService.get(orderId);
+        PaymentOrderResponse order = paymentOrderApi.get(orderId);
         if (!PaymentStatus.REVIEW.name().equals(order.status())) {
             throw new BusinessException(RiskErrorCode.ORDER_NOT_IN_REVIEW,
                     "订单当前状态 " + order.status() + "，不在风控待审状态");

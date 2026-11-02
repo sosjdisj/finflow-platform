@@ -9,7 +9,10 @@ public enum NotificationErrorCode implements ErrorCodeSpec {
 
     TEMPLATE_NOT_FOUND(52001, "通知模板不存在或未启用", 404),
 
-    NOTIFICATION_NOT_FOUND(52002, "通知不存在", 404);
+    NOTIFICATION_NOT_FOUND(52002, "通知不存在", 404),
+
+    /** M16：通知服务不可用或已触发熔断降级（管理端按快速失败提示）。 */
+    NOTIFICATION_SERVICE_UNAVAILABLE(52003, "通知服务不可用，请稍后重试", 503);
 
     private final int code;
     private final String message;

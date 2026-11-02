@@ -9,7 +9,7 @@ import org.example.finflowbackend.auth.dto.LoginRequest;
 import org.example.finflowbackend.auth.dto.RegisterRequest;
 import org.example.finflowbackend.auth.dto.SessionResponse;
 import org.example.finflowbackend.auth.dto.TokenResponse;
-import org.example.finflowbackend.auth.dto.UserInfoResponse;
+import org.example.finflowbackend.auth.api.UserInfoResponse;
 import org.example.finflowbackend.auth.entity.SysLoginLog;
 import org.example.finflowbackend.auth.entity.SysRefreshToken;
 import org.example.finflowbackend.auth.entity.SysUser;

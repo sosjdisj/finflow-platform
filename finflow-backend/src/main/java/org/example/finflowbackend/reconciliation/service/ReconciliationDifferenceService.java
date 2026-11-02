@@ -5,8 +5,8 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.example.finflowbackend.common.api.PageResponse;
 import org.example.finflowbackend.common.exception.BusinessException;
-import org.example.finflowbackend.ledger.entity.AccountLedger;
-import org.example.finflowbackend.ledger.service.LedgerService;
+import org.example.finflowbackend.ledger.api.LedgerApi;
+import org.example.finflowbackend.ledger.api.LedgerEntry;
 import org.example.finflowbackend.reconciliation.ReconciliationDifferenceStatus;
 import org.example.finflowbackend.reconciliation.ReconciliationErrorCode;
 import org.example.finflowbackend.reconciliation.entity.ReconciliationDifference;
@@ -48,14 +48,14 @@ public class ReconciliationDifferenceService {
 
     private final ReconciliationDifferenceMapper differenceMapper;
     private final ReconciliationRecordMapper recordMapper;
-    private final LedgerService ledgerService;
+    private final LedgerApi ledgerApi;
 
     public ReconciliationDifferenceService(ReconciliationDifferenceMapper differenceMapper,
                                            ReconciliationRecordMapper recordMapper,
-                                           LedgerService ledgerService) {
+                                           LedgerApi ledgerApi) {
         this.differenceMapper = differenceMapper;
         this.recordMapper = recordMapper;
-        this.ledgerService = ledgerService;
+        this.ledgerApi = ledgerApi;
     }
 
     /** 由匹配记录发起差异单：快照关键字段，同记录存在未终态差异单时拒绝。 */
@@ -167,8 +167,8 @@ public class ReconciliationDifferenceService {
                 throw new BusinessException(ReconciliationErrorCode.DIFFERENCE_HANDLE_INVALID,
                         "调账处理需指定目标账户与带符号金额（正调增/负调减，不能为 0）");
             }
-            AccountLedger ledger = ledgerService.adjust(accountId, amount, adjustRemark(diff, handleResult));
-            update.set(ReconciliationDifference::getLedgerNo, ledger.getBizNo());
+            LedgerEntry ledger = ledgerApi.adjust(accountId, amount, adjustRemark(diff, handleResult));
+            update.set(ReconciliationDifference::getLedgerNo, ledger.bizNo());
         } else if (ReconciliationDifference.HANDLE_SUPPLEMENT.equals(diff.getHandleType())) {
             if (handleResult == null || handleResult.isBlank()) {
                 throw new BusinessException(ReconciliationErrorCode.DIFFERENCE_HANDLE_INVALID,

@@ -4,7 +4,7 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.example.finflowbackend.common.exception.BusinessException;
 import org.example.finflowbackend.system.SystemErrorCode;
 import org.example.finflowbackend.system.dto.MenuCreateRequest;
-import org.example.finflowbackend.system.dto.MenuTreeNode;
+import org.example.finflowbackend.system.api.MenuTreeNode;
 import org.example.finflowbackend.system.dto.MenuUpdateRequest;
 import org.example.finflowbackend.system.entity.SysMenu;
 import org.example.finflowbackend.system.mapper.SysMenuMapper;

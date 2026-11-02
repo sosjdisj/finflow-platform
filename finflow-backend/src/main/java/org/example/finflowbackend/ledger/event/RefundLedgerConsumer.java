@@ -1,13 +1,13 @@
 package org.example.finflowbackend.ledger.event;
 
-import org.example.finflowbackend.account.AccountOwnerType;
-import org.example.finflowbackend.account.entity.Account;
-import org.example.finflowbackend.account.service.AccountService;
-import org.example.finflowbackend.common.event.DomainEvent;
+import org.example.finflowbackend.account.api.AccountApi;
+import org.example.finflowbackend.account.api.AccountOwnerType;
+import org.example.finflowbackend.account.api.AccountSnapshot;
 import org.example.finflowbackend.common.event.EventDeduplicationService;
+import org.example.finflowbackend.contract.DomainEvent;
+import org.example.finflowbackend.contract.EventTopics;
+import org.example.finflowbackend.contract.RefundSucceededPayload;
 import org.example.finflowbackend.ledger.service.LedgerService;
-import org.example.finflowbackend.refund.event.RefundSucceededPayload;
-import org.example.finflowbackend.refund.event.RefundTopics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DuplicateKeyException;
@@ -32,20 +32,20 @@ public class RefundLedgerConsumer {
 
     private final EventDeduplicationService deduplicationService;
     private final ObjectMapper objectMapper;
-    private final AccountService accountService;
+    private final AccountApi accountApi;
     private final LedgerService ledgerService;
 
     public RefundLedgerConsumer(EventDeduplicationService deduplicationService,
                                 ObjectMapper objectMapper,
-                                AccountService accountService,
+                                AccountApi accountApi,
                                 LedgerService ledgerService) {
         this.deduplicationService = deduplicationService;
         this.objectMapper = objectMapper;
-        this.accountService = accountService;
+        this.accountApi = accountApi;
         this.ledgerService = ledgerService;
     }
 
-    @KafkaListener(topics = RefundTopics.TOPIC_REFUND_SUCCEEDED, groupId = GROUP_ID)
+    @KafkaListener(topics = EventTopics.REFUND_SUCCEEDED, groupId = GROUP_ID)
     public void onMessage(String message) {
         handle(message);
     }
@@ -59,10 +59,10 @@ public class RefundLedgerConsumer {
         }
         RefundSucceededPayload payload =
                 objectMapper.convertValue(event.payload(), RefundSucceededPayload.class);
-        Account account = accountService.getOrCreate(
+        AccountSnapshot account = accountApi.getOrCreate(
                 AccountOwnerType.PLATFORM, PLATFORM_OWNER_ID, payload.currency());
         try {
-            ledgerService.debit(account.getId(), "REFUND", payload.refundNo(),
+            ledgerService.debit(account.id(), "REFUND", payload.refundNo(),
                     payload.refundAmount(), "REFUND_EVENT", "退款冲减: " + payload.platformOrderNo());
         } catch (DuplicateKeyException e) {
             // 库层幂等兜底：Redis 去重窗口外的重投，同退款单流水已存在，视为已出账

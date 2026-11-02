@@ -1,24 +1,19 @@
 package org.example.finflowbackend.notification.event;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import org.example.finflowbackend.common.event.DomainEvent;
 import org.example.finflowbackend.common.event.EventDeduplicationService;
 import org.example.finflowbackend.common.exception.BusinessException;
+import org.example.finflowbackend.contract.DomainEvent;
+import org.example.finflowbackend.contract.EventTopics;
+import org.example.finflowbackend.contract.PaymentSucceededPayload;
+import org.example.finflowbackend.contract.ReconciliationAbnormalPayload;
+import org.example.finflowbackend.contract.RefundSucceededPayload;
+import org.example.finflowbackend.contract.RiskInterceptedPayload;
+import org.example.finflowbackend.contract.SettlementSucceededPayload;
 import org.example.finflowbackend.notification.service.NotificationService;
-import org.example.finflowbackend.payment.dto.PaymentOrderResponse;
-import org.example.finflowbackend.payment.event.PaymentSucceededPayload;
-import org.example.finflowbackend.payment.event.PaymentTopics;
-import org.example.finflowbackend.payment.service.PaymentOrderService;
-import org.example.finflowbackend.reconciliation.event.ReconciliationAbnormalPayload;
-import org.example.finflowbackend.reconciliation.event.ReconciliationTopics;
-import org.example.finflowbackend.refund.event.RefundSucceededPayload;
-import org.example.finflowbackend.refund.event.RefundTopics;
-import org.example.finflowbackend.risk.event.RiskInterceptedPayload;
-import org.example.finflowbackend.risk.event.RiskTopics;
-import org.example.finflowbackend.settlement.event.SettlementSucceededPayload;
-import org.example.finflowbackend.settlement.event.SettlementTopics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
@@ -32,12 +27,14 @@ import java.util.Map;
 
 /**
  * 通知事件消费者（S33）：订阅支付成功 / 退款成功 / 结算完成 / 风控拦截 / 对账异常五类事件，
- * 渲染模板并发送通知。风控拦截通知商户（回查订单取商户与平台单号）；对账异常为平台通知（USER 收件）。
+ * 渲染模板并发送通知。商户事件收件人取自 payload（M16 起不再同步回查订单 / 商户，保持纯异步）；
+ * 对账异常为平台通知（USER 收件）。
  * 幂等：Redis 按 eventId 去重在前，notification.uk(event_id) 兜底在后。
- * 事实源：支付 / 风控事件以回查订单取商户为准（防 payload 陈旧，沿清分 / Webhook 消费者惯例）；
- * 退款 / 结算 / 对账事件 payload 自带归属。模板缺失 / 商户缺失只记日志，不阻断消费。
+ * 模板缺失 / 商户缺失只记日志，不阻断消费。
+ * M16：随通知进程独立部署（finflow.notify.worker=true 时装配）。
  */
 @Component
+@ConditionalOnProperty(name = "finflow.notify.worker", havingValue = "true", matchIfMissing = true)
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class NotificationEventConsumer {
 
@@ -57,35 +54,31 @@ public class NotificationEventConsumer {
 
     private final EventDeduplicationService deduplicationService;
     private final ObjectMapper objectMapper;
-    private final PaymentOrderService paymentOrderService;
     private final NotificationService notificationService;
 
     public NotificationEventConsumer(EventDeduplicationService deduplicationService,
                                      ObjectMapper objectMapper,
-                                     PaymentOrderService paymentOrderService,
                                      NotificationService notificationService) {
         this.deduplicationService = deduplicationService;
         this.objectMapper = objectMapper;
-        this.paymentOrderService = paymentOrderService;
         this.notificationService = notificationService;
     }
 
-    @KafkaListener(topics = PaymentTopics.TOPIC_SUCCEEDED, groupId = GROUP_ID)
+    @KafkaListener(topics = EventTopics.PAYMENT_SUCCEEDED, groupId = GROUP_ID)
     public void onPaymentSucceeded(String message) {
         handle(message, event -> {
             PaymentSucceededPayload payload =
                     objectMapper.convertValue(event.payload(), PaymentSucceededPayload.class);
-            PaymentOrderResponse order = paymentOrderService.get(payload.orderId());
             Map<String, String> params = new LinkedHashMap<>();
             params.put("platformOrderNo", payload.platformOrderNo());
             params.put("amount", fenToYuan(payload.amount()));
             params.put("currency", payload.currency());
             params.put("paidAt", fmt(payload.paidAt()));
-            return Notice.toMerchant("PAYMENT_SUCCEEDED", order.merchantId(), params);
+            return Notice.toMerchant("PAYMENT_SUCCEEDED", payload.merchantId(), params);
         });
     }
 
-    @KafkaListener(topics = RefundTopics.TOPIC_REFUND_SUCCEEDED, groupId = GROUP_ID)
+    @KafkaListener(topics = EventTopics.REFUND_SUCCEEDED, groupId = GROUP_ID)
     public void onRefundSucceeded(String message) {
         handle(message, event -> {
             RefundSucceededPayload payload =
@@ -100,7 +93,7 @@ public class NotificationEventConsumer {
         });
     }
 
-    @KafkaListener(topics = SettlementTopics.TOPIC_SETTLEMENT_SUCCEEDED, groupId = GROUP_ID)
+    @KafkaListener(topics = EventTopics.SETTLEMENT_SUCCEEDED, groupId = GROUP_ID)
     public void onSettlementSucceeded(String message) {
         handle(message, event -> {
             SettlementSucceededPayload payload =
@@ -115,23 +108,21 @@ public class NotificationEventConsumer {
         });
     }
 
-    @KafkaListener(topics = RiskTopics.TOPIC_INTERCEPTED, groupId = GROUP_ID)
+    @KafkaListener(topics = EventTopics.RISK_INTERCEPTED, groupId = GROUP_ID)
     public void onRiskIntercepted(String message) {
         handle(message, event -> {
             RiskInterceptedPayload payload =
                     objectMapper.convertValue(event.payload(), RiskInterceptedPayload.class);
-            // 商户与平台单号以回查订单为准（payload 可能陈旧）
-            PaymentOrderResponse order = paymentOrderService.get(payload.orderId());
             Map<String, String> params = new LinkedHashMap<>();
-            params.put("platformOrderNo", order.platformOrderNo());
+            params.put("platformOrderNo", payload.platformOrderNo());
             params.put("action", "REVIEW".equals(payload.verdict()) ? "拦截审核" : "拒绝");
             params.put("score", String.valueOf(payload.totalScore()));
             params.put("reasons", payload.reason());
-            return Notice.toMerchant("RISK_INTERCEPTED", order.merchantId(), params);
+            return Notice.toMerchant("RISK_INTERCEPTED", payload.merchantId(), params);
         });
     }
 
-    @KafkaListener(topics = ReconciliationTopics.TOPIC_ABNORMAL, groupId = GROUP_ID)
+    @KafkaListener(topics = EventTopics.RECONCILIATION_ABNORMAL, groupId = GROUP_ID)
     public void onReconciliationAbnormal(String message) {
         handle(message, event -> {
             ReconciliationAbnormalPayload payload =

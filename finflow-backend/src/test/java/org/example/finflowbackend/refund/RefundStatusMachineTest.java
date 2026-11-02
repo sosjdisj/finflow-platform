@@ -1,6 +1,7 @@
 package org.example.finflowbackend.refund;
 
 import org.example.finflowbackend.common.exception.BusinessException;
+import org.example.finflowbackend.refund.api.RefundErrorCode;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;

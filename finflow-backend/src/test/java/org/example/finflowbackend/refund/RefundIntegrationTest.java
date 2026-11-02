@@ -1,11 +1,12 @@
 package org.example.finflowbackend.refund;
 
+import org.example.finflowbackend.channel.api.ChannelRequest;
+import org.example.finflowbackend.channel.api.ChannelOperationsApi;
 import org.example.finflowbackend.common.exception.BusinessException;
-import org.example.finflowbackend.payment.channel.ChannelRequest;
-import org.example.finflowbackend.payment.channel.PaymentChannelRouter;
-import org.example.finflowbackend.payment.dto.PaymentOrderCreateRequest;
-import org.example.finflowbackend.payment.dto.PaymentOrderResponse;
+import org.example.finflowbackend.payment.api.PaymentOrderCreateRequest;
+import org.example.finflowbackend.payment.api.PaymentOrderResponse;
 import org.example.finflowbackend.payment.service.PaymentOrderService;
+import org.example.finflowbackend.refund.api.RefundErrorCode;
 import org.example.finflowbackend.refund.dto.RefundCreateRequest;
 import org.example.finflowbackend.refund.dto.RefundOrderResponse;
 import org.example.finflowbackend.refund.service.RefundService;
@@ -44,7 +45,7 @@ class RefundIntegrationTest extends IntegrationTestBase {
     private PaymentOrderService paymentOrderService;
 
     @Autowired
-    private PaymentChannelRouter channelRouter;
+    private ChannelOperationsApi channelOperations;
 
     @Autowired
     private RefundService refundService;
@@ -154,7 +155,7 @@ class RefundIntegrationTest extends IntegrationTestBase {
                 merchantId, orderNoPrefix + System.nanoTime(), amount, null,
                 "退款验收商品", null, "ALIPAY", null, null, null, null));
         paymentOrderService.changeStatus(order.id(), "PENDING", "渠道受理", "TEST");
-        channelRouter.route("ALIPAY").createPayment(new ChannelRequest(order.id(),
+        channelOperations.createPayment(new ChannelRequest(order.id(),
                 platformOrderNo(order.id()), null, null, amount, "ALIPAY", "退款验收商品", null));
         assertEquals("PAID", awaitOrderStatus(order.id(), "PAID"));
         return paymentOrderService.get(order.id());

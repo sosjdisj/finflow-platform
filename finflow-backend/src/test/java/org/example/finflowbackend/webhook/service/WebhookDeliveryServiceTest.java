@@ -2,14 +2,10 @@ package org.example.finflowbackend.webhook.service;
 
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.sun.net.httpserver.HttpServer;
+import org.example.finflowbackend.common.tunable.TunableConfig;
 import org.example.finflowbackend.common.util.HmacSigner;
-import org.example.finflowbackend.merchant.dto.MerchantDetailResponse;
-import org.example.finflowbackend.merchant.dto.MerchantResponse;
-import org.example.finflowbackend.merchant.entity.Merchant;
-import org.example.finflowbackend.merchant.service.ApiKeyService;
-import org.example.finflowbackend.merchant.service.MerchantService;
-import org.example.finflowbackend.system.config.ConfigKeys;
-import org.example.finflowbackend.system.service.ConfigService;
+import org.example.finflowbackend.notify.api.NotifyConfig;
+import org.example.finflowbackend.notify.api.NotifyMerchantConfigApi;
 import org.example.finflowbackend.webhook.entity.WebhookDelivery;
 import org.example.finflowbackend.webhook.entity.WebhookEvent;
 import org.example.finflowbackend.webhook.mapper.WebhookDeliveryMapper;
@@ -38,9 +34,10 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Webhook 投递单测（S32 验收核心）：本地起 JDK 接收服务，
+ * Webhook 投递单测（S32 / M16 验收核心）：本地起 JDK 接收服务，
  * 验证签名 = HMAC-SHA256(timestamp + "." + body, secret)、报文与库中 payload 一致、
  * 投递日志一次尝试一行、失败按指数退避推进、耗尽与无订阅降级。
+ * M16 起商户回调配置改读 {@link NotifyMerchantConfigApi}（本地读商户 / 远程读投影）。
  */
 class WebhookDeliveryServiceTest {
 
@@ -48,9 +45,8 @@ class WebhookDeliveryServiceTest {
 
     private final WebhookEventMapper eventMapper = mock(WebhookEventMapper.class);
     private final WebhookDeliveryMapper deliveryMapper = mock(WebhookDeliveryMapper.class);
-    private final MerchantService merchantService = mock(MerchantService.class);
-    private final ApiKeyService apiKeyService = mock(ApiKeyService.class);
-    private final ConfigService configService = mock(ConfigService.class);
+    private final NotifyMerchantConfigApi configApi = mock(NotifyMerchantConfigApi.class);
+    private final TunableConfig tunables = mock(TunableConfig.class);
 
     private WebhookDeliveryService service;
     private HttpServer server;
@@ -62,9 +58,8 @@ class WebhookDeliveryServiceTest {
 
     @BeforeEach
     void setUp() throws IOException {
-        when(configService.getLong(ConfigKeys.WEBHOOK_MAX_RETRIES)).thenReturn(5L);
-        service = new WebhookDeliveryService(eventMapper, deliveryMapper, merchantService, apiKeyService,
-                configService);
+        when(tunables.webhookMaxRetries()).thenReturn(5);
+        service = new WebhookDeliveryService(eventMapper, deliveryMapper, configApi, tunables);
         server = HttpServer.create(new InetSocketAddress(0), 0);
         server.createContext("/", exchange -> {
             String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
@@ -77,7 +72,6 @@ class WebhookDeliveryServiceTest {
         });
         server.start();
         port = server.getAddress().getPort();
-        when(apiKeyService.findSigningSecret(1L)).thenReturn(Optional.of(SECRET));
         stubMerchantWebhookUrl("http://localhost:" + port + "/callback");
     }
 
@@ -191,11 +185,12 @@ class WebhookDeliveryServiceTest {
     }
 
     private void stubMerchantWebhookUrl(String url) {
-        Merchant merchant = new Merchant();
-        merchant.setId(1L);
-        merchant.setWebhookUrl(url);
-        when(merchantService.getDetail(1L))
-                .thenReturn(new MerchantDetailResponse(MerchantResponse.from(merchant), List.of()));
+        if (url == null) {
+            when(configApi.find(1L)).thenReturn(Optional.empty());
+            return;
+        }
+        when(configApi.find(1L))
+                .thenReturn(Optional.of(new NotifyConfig(url, "merchant@example.com", SECRET)));
     }
 
     private UpdateWrapper<WebhookEvent> capturedUpdate() {

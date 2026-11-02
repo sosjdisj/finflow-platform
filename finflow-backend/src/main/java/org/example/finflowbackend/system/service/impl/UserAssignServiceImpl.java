@@ -1,8 +1,8 @@
 package org.example.finflowbackend.system.service.impl;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
-import org.example.finflowbackend.audit.AuditRecorder;
-import org.example.finflowbackend.auth.service.AuthService;
+import org.example.finflowbackend.audit.api.AuditApi;
+import org.example.finflowbackend.auth.api.AuthApi;
 import org.example.finflowbackend.common.exception.BusinessException;
 import org.example.finflowbackend.system.SystemErrorCode;
 import org.example.finflowbackend.system.dto.AssignRolesRequest;
@@ -18,22 +18,22 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 
 /**
- * 用户角色分配实现。用户主体属于 auth 模块，经 AuthService 校验存在性（铁律 4：不跨模块读表）。
+ * 用户角色分配实现。用户主体属于 auth 模块，经 AuthApi 校验存在性（铁律 4：不跨模块读表）。
  */
 @Service
 public class UserAssignServiceImpl implements UserAssignService {
 
     private final SysUserRoleMapper userRoleMapper;
     private final SysRoleMapper roleMapper;
-    private final AuthService authService;
-    private final AuditRecorder auditRecorder;
+    private final AuthApi authApi;
+    private final AuditApi auditApi;
 
     public UserAssignServiceImpl(SysUserRoleMapper userRoleMapper, SysRoleMapper roleMapper,
-                                 AuthService authService, AuditRecorder auditRecorder) {
+                                 AuthApi authApi, AuditApi auditApi) {
         this.userRoleMapper = userRoleMapper;
         this.roleMapper = roleMapper;
-        this.authService = authService;
-        this.auditRecorder = auditRecorder;
+        this.authApi = authApi;
+        this.auditApi = auditApi;
     }
 
     @Override
@@ -68,11 +68,11 @@ public class UserAssignServiceImpl implements UserAssignService {
             userRoleMapper.insert(link);
         }
         // 用户角色分配审计：改前/改后角色 ID 集（S35）
-        auditRecorder.submit(beforeIds, List.copyOf(roleIds));
+        auditApi.submit(beforeIds, List.copyOf(roleIds));
     }
 
     /** 用户存在性经 auth 模块服务校验，用户不存在时其内部抛统一 404。 */
     private void requireUser(Long userId) {
-        authService.getUserInfo(userId);
+        authApi.getUserInfo(userId);
     }
 }

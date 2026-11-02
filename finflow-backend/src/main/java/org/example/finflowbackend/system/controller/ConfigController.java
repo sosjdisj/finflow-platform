@@ -2,7 +2,7 @@ package org.example.finflowbackend.system.controller;
 
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
-import org.example.finflowbackend.audit.annotation.Audited;
+import org.example.finflowbackend.audit.api.Audited;
 import org.example.finflowbackend.common.api.ApiResponse;
 import org.example.finflowbackend.system.dto.ConfigResponse;
 import org.example.finflowbackend.system.dto.ConfigUpdateRequest;

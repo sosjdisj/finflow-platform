@@ -1,11 +1,11 @@
 package org.example.finflowbackend.merchant.service.impl;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
-import org.example.finflowbackend.audit.AuditRecorder;
-import org.example.finflowbackend.auth.web.CurrentUserHolder;
+import org.example.finflowbackend.audit.api.AuditApi;
+import org.example.finflowbackend.common.context.CurrentUserHolder;
 import org.example.finflowbackend.common.exception.BusinessException;
 import org.example.finflowbackend.merchant.MerchantErrorCode;
-import org.example.finflowbackend.merchant.dto.ClearingFeeRateView;
+import org.example.finflowbackend.merchant.api.ClearingFeeRateView;
 import org.example.finflowbackend.merchant.dto.MerchantRateLogResponse;
 import org.example.finflowbackend.merchant.dto.MerchantRateResponse;
 import org.example.finflowbackend.merchant.dto.MerchantRateSetRequest;
@@ -33,16 +33,16 @@ public class RateServiceImpl implements RateService {
     private final MerchantRateLogMapper rateLogMapper;
     private final MerchantTierRateMapper tierRateMapper;
     private final MerchantService merchantService;
-    private final AuditRecorder auditRecorder;
+    private final AuditApi auditApi;
 
     public RateServiceImpl(MerchantRateMapper rateMapper, MerchantRateLogMapper rateLogMapper,
                            MerchantTierRateMapper tierRateMapper, MerchantService merchantService,
-                           AuditRecorder auditRecorder) {
+                           AuditApi auditApi) {
         this.rateMapper = rateMapper;
         this.rateLogMapper = rateLogMapper;
         this.tierRateMapper = tierRateMapper;
         this.merchantService = merchantService;
-        this.auditRecorder = auditRecorder;
+        this.auditApi = auditApi;
     }
 
     @Override
@@ -102,7 +102,7 @@ public class RateServiceImpl implements RateService {
         }
         logEntry.setOperator(CurrentUserHolder.current().username());
         rateLogMapper.insert(logEntry);
-        auditRecorder.submit(beforeSnapshot, existing);
+        auditApi.submit(beforeSnapshot, existing);
         return MerchantRateResponse.from(existing);
     }
 

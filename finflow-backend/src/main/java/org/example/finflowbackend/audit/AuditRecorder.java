@@ -1,5 +1,6 @@
 package org.example.finflowbackend.audit;
 
+import org.example.finflowbackend.audit.api.AuditApi;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
@@ -9,7 +10,7 @@ import tools.jackson.databind.ObjectMapper;
  * ThreadLocal 挂在切面清理，未匹配切面的调用不会留下脏数据（下次提交会覆盖）。
  */
 @Component
-public class AuditRecorder {
+public class AuditRecorder implements AuditApi {
 
     private final ThreadLocal<Snapshots> holder = new ThreadLocal<>();
     private final ObjectMapper objectMapper;
@@ -19,6 +20,7 @@ public class AuditRecorder {
     }
 
     /** 提交改前/改后快照（传对象/Map/记录均可，立即序列化为 JSON；null 表示无快照）。 */
+    @Override
     public void submit(Object before, Object after) {
         holder.set(new Snapshots(toJson(before), toJson(after)));
     }

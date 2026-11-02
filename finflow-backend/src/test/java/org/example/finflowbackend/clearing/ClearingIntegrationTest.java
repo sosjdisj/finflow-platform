@@ -1,17 +1,17 @@
 package org.example.finflowbackend.clearing;
 
-import org.example.finflowbackend.common.event.DomainEvent;
+import org.example.finflowbackend.channel.api.ChannelRequest;
+import org.example.finflowbackend.channel.api.ChannelOperationsApi;
 import org.example.finflowbackend.clearing.entity.ClearingDetail;
 import org.example.finflowbackend.clearing.entity.ClearingOrder;
 import org.example.finflowbackend.clearing.event.ClearingEventConsumer;
 import org.example.finflowbackend.clearing.mapper.ClearingDetailMapper;
 import org.example.finflowbackend.clearing.mapper.ClearingOrderMapper;
-import org.example.finflowbackend.payment.channel.ChannelRequest;
-import org.example.finflowbackend.payment.channel.PaymentChannelRouter;
-import org.example.finflowbackend.payment.dto.PaymentOrderCreateRequest;
-import org.example.finflowbackend.payment.dto.PaymentOrderResponse;
-import org.example.finflowbackend.payment.event.PaymentSucceededPayload;
-import org.example.finflowbackend.payment.event.PaymentTopics;
+import org.example.finflowbackend.contract.DomainEvent;
+import org.example.finflowbackend.contract.EventTypes;
+import org.example.finflowbackend.contract.PaymentSucceededPayload;
+import org.example.finflowbackend.payment.api.PaymentOrderCreateRequest;
+import org.example.finflowbackend.payment.api.PaymentOrderResponse;
 import org.example.finflowbackend.payment.service.PaymentOrderService;
 import org.example.finflowbackend.support.IntegrationTestBase;
 import org.junit.jupiter.api.BeforeEach;
@@ -43,7 +43,7 @@ class ClearingIntegrationTest extends IntegrationTestBase {
     private PaymentOrderService paymentOrderService;
 
     @Autowired
-    private PaymentChannelRouter channelRouter;
+    private ChannelOperationsApi channelOperations;
 
     @Autowired
     private ClearingOrderMapper clearingOrderMapper;
@@ -121,9 +121,9 @@ class ClearingIntegrationTest extends IntegrationTestBase {
 
         // 新 eventId 的重投（绕过 Redis 去重窗口），uk(order_id) 兜底跳过
         DomainEvent replay = new DomainEvent(UUID.randomUUID().toString(),
-                PaymentTopics.TYPE_SUCCEEDED, Instant.now(),
-                new PaymentSucceededPayload(order.id(), order.platformOrderNo(), order.amount(), "CNY",
-                        LocalDateTime.now()));
+                EventTypes.PAYMENT_SUCCEEDED, Instant.now(), DomainEvent.CURRENT_VERSION,
+                new PaymentSucceededPayload(order.id(), order.merchantId(), order.platformOrderNo(),
+                        order.amount(), "CNY", LocalDateTime.now()));
         clearingConsumer.handle(objectMapper.writeValueAsString(replay));
 
         Long count = jdbcTemplate.queryForObject(
@@ -141,7 +141,7 @@ class ClearingIntegrationTest extends IntegrationTestBase {
                 merchantId, "CL-" + System.nanoTime(), amount, null,
                 "清分验收商品", null, "ALIPAY", null, null, null, null));
         paymentOrderService.changeStatus(order.id(), "PENDING", "渠道受理", "TEST");
-        channelRouter.route("ALIPAY").createPayment(new ChannelRequest(order.id(),
+        channelOperations.createPayment(new ChannelRequest(order.id(),
                 order.platformOrderNo(), null, null, amount, "ALIPAY", "清分验收商品", null));
         awaitStatus(order.id(), "PAID");
         return paymentOrderService.get(order.id());

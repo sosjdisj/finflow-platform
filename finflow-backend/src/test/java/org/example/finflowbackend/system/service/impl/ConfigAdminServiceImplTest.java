@@ -1,9 +1,9 @@
 package org.example.finflowbackend.system.service.impl;
 
-import org.example.finflowbackend.auth.token.CurrentUser;
+import org.example.finflowbackend.common.context.CurrentUser;
 import org.example.finflowbackend.common.exception.BusinessException;
 import org.example.finflowbackend.system.SystemErrorCode;
-import org.example.finflowbackend.system.config.ConfigKeys;
+import org.example.finflowbackend.system.api.ConfigKeys;
 import org.example.finflowbackend.system.dto.ConfigUpdateRequest;
 import org.example.finflowbackend.system.entity.SystemConfig;
 import org.example.finflowbackend.system.mapper.SystemConfigMapper;
@@ -82,6 +82,18 @@ class ConfigAdminServiceImplTest {
         when(configMapper.selectList(any())).thenReturn(List.of(row(ConfigKeys.PAYMENT_SINGLE_LIMIT.key(), "1")));
 
         assertEquals(1, service.listAll().size());
+    }
+
+    /** M14：已迁往 Nacos 的存量行不再出现在管理页，避免「后台可改但运行时已不读」。 */
+    @Test
+    void listAllHidesKeysMigratedToConfigCenter() {
+        when(configMapper.selectList(any())).thenReturn(List.of(
+                row("risk.review-threshold", "30"),
+                row("risk.reject-threshold", "60"),
+                row(ConfigKeys.PAYMENT_SINGLE_LIMIT.key(), "10000000")));
+
+        assertEquals(1, service.listAll().size());
+        assertEquals(ConfigKeys.PAYMENT_SINGLE_LIMIT.key(), service.listAll().getFirst().configKey());
     }
 
     private SystemConfig row(String key, String value) {

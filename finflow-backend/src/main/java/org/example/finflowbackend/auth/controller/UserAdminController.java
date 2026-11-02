@@ -8,7 +8,7 @@ import org.example.finflowbackend.auth.dto.UserPasswordRequest;
 import org.example.finflowbackend.auth.dto.UserStatusRequest;
 import org.example.finflowbackend.auth.dto.UserUpdateRequest;
 import org.example.finflowbackend.auth.service.UserAdminService;
-import org.example.finflowbackend.auth.web.CurrentUserHolder;
+import org.example.finflowbackend.common.context.CurrentUserHolder;
 import org.example.finflowbackend.common.api.ApiResponse;
 import org.example.finflowbackend.common.api.PageResponse;
 import org.springframework.security.access.prepost.PreAuthorize;

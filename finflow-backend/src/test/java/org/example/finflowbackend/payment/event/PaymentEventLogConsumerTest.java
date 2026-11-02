@@ -1,7 +1,9 @@
 package org.example.finflowbackend.payment.event;
 
-import org.example.finflowbackend.common.event.DomainEvent;
 import org.example.finflowbackend.common.event.EventDeduplicationService;
+import org.example.finflowbackend.contract.DomainEvent;
+import org.example.finflowbackend.contract.EventTypes;
+import org.example.finflowbackend.contract.PaymentSucceededPayload;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
 
@@ -41,8 +43,8 @@ class PaymentEventLogConsumerTest {
     }
 
     private String eventJson(String eventId) {
-        return objectMapper.writeValueAsString(new DomainEvent(eventId, PaymentTopics.TYPE_SUCCEEDED,
-                java.time.Instant.now(),
-                new PaymentSucceededPayload(1L, "P20261017000001", 10000L, "CNY", null)));
+        return objectMapper.writeValueAsString(new DomainEvent(eventId, EventTypes.PAYMENT_SUCCEEDED,
+                java.time.Instant.now(), DomainEvent.CURRENT_VERSION,
+                new PaymentSucceededPayload(1L, 1L, "P20261017000001", 10000L, "CNY", null)));
     }
 }

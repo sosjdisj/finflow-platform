@@ -1,11 +1,10 @@
 package org.example.finflowbackend.payment;
 
-import org.example.finflowbackend.payment.channel.ChannelRequest;
-import org.example.finflowbackend.payment.channel.ChannelResult;
-import org.example.finflowbackend.payment.channel.PaymentChannel;
-import org.example.finflowbackend.payment.channel.PaymentChannelRouter;
-import org.example.finflowbackend.payment.dto.PaymentOrderCreateRequest;
-import org.example.finflowbackend.payment.dto.PaymentOrderResponse;
+import org.example.finflowbackend.channel.api.ChannelRequest;
+import org.example.finflowbackend.channel.api.ChannelResult;
+import org.example.finflowbackend.channel.api.ChannelOperationsApi;
+import org.example.finflowbackend.payment.api.PaymentOrderCreateRequest;
+import org.example.finflowbackend.payment.api.PaymentOrderResponse;
 import org.example.finflowbackend.payment.service.PaymentOrderService;
 import org.example.finflowbackend.support.FakeChannelStub;
 import org.example.finflowbackend.support.IntegrationTestBase;
@@ -34,7 +33,7 @@ class PaymentChannelIntegrationTest extends IntegrationTestBase {
     private PaymentOrderService paymentOrderService;
 
     @Autowired
-    private PaymentChannelRouter channelRouter;
+    private ChannelOperationsApi channelOperations;
 
     private Long merchantId;
 
@@ -57,7 +56,7 @@ class PaymentChannelIntegrationTest extends IntegrationTestBase {
         FakeChannelStub.get().setFailRate(0.0);
         Long orderId = createPendingOrder("CH-PAID-");
 
-        ChannelResult accepted = channelRouter.route("ALIPAY")
+        ChannelResult accepted = channelOperations
                 .createPayment(new ChannelRequest(orderId, platformOrderNo(orderId), null, null,
                         10000L, "ALIPAY", "渠道验收-成功", null));
 
@@ -72,7 +71,7 @@ class PaymentChannelIntegrationTest extends IntegrationTestBase {
         FakeChannelStub.get().setFailRate(1.0);
         Long orderId = createPendingOrder("CH-FAIL-");
 
-        ChannelResult accepted = channelRouter.route("WECHAT")
+        ChannelResult accepted = channelOperations
                 .createPayment(new ChannelRequest(orderId, platformOrderNo(orderId), null, null,
                         10000L, "WECHAT", "渠道验收-失败", null));
 
@@ -119,7 +118,7 @@ class PaymentChannelIntegrationTest extends IntegrationTestBase {
 
     private void assertTransactionRecorded(Long orderId, String channelOrderNo) {
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(
-                "SELECT channel_code, txn_type, channel_order_no FROM payment_transaction WHERE order_id = ?",
+                "SELECT channel_code, txn_type, channel_order_no FROM finflow_channel.payment_transaction WHERE order_id = ?",
                 orderId);
         assertEquals(1, rows.size());
         assertEquals("MOCK_WALLET", rows.getFirst().get("channel_code"));

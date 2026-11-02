@@ -3,6 +3,8 @@ package org.example.finflowbackend.system.file;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.example.finflowbackend.common.exception.BusinessException;
 import org.example.finflowbackend.system.SystemErrorCode;
+import org.example.finflowbackend.system.api.file.FileBizType;
+import org.example.finflowbackend.system.api.file.FileObjectResponse;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -69,6 +71,11 @@ public class FileObjectServiceImpl implements FileObjectService {
     public InputStream openStream(long id) {
         FileObject fileObject = requireFile(id);
         return storage.get(fileObject.getObjectKey());
+    }
+
+    @Override
+    public InputStream openByObjectKey(String objectKey) {
+        return storage.get(objectKey);
     }
 
     private FileObject requireFile(long id) {

@@ -12,6 +12,27 @@ spring:
       password: ${REDIS_PASSWORD:}
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS}
+  # M14 配置中心导入：写在 prod 文档里，此时上面的 enabled=true 已生效（非 profile 阶段还读不到）
+  config:
+    import:
+      - optional:nacos:finflow-common.yaml
+      - optional:nacos:${spring.application.name}.yaml
+  # M08 生产为多进程部署：backend 与渠道服务都注册到 Nacos（compose 服务名 nacos）
+  cloud:
+    nacos:
+      discovery:
+        enabled: true
+        server-addr: ${NACOS_SERVER_ADDR:nacos:8848}
+      # M14 配置中心：生产强制开启，namespace 按环境隔离
+      config:
+        enabled: true
+        server-addr: ${NACOS_SERVER_ADDR:nacos:8848}
+        namespace: ${FINFLOW_NACOS_NAMESPACE:}
+        group: ${FINFLOW_NACOS_GROUP:FINFLOW_GROUP}
+    sentinel:
+      transport:
+        # Sentinel 控制台地址由环境变量注入；留空则不上报
+        dashboard: ${SENTINEL_DASHBOARD:}
 finflow:
   auth:
     jwt:

@@ -1,18 +1,18 @@
 package org.example.finflowbackend.payment.service;
 
+import org.example.finflowbackend.channel.api.ChannelErrorCode;
+import org.example.finflowbackend.channel.api.ChannelOperationsApi;
+import org.example.finflowbackend.channel.api.ChannelRequest;
+import org.example.finflowbackend.channel.api.ChannelResult;
 import org.example.finflowbackend.common.exception.BusinessException;
 import org.example.finflowbackend.payment.PaymentErrorCode;
-import org.example.finflowbackend.payment.PaymentStatus;
-import org.example.finflowbackend.payment.channel.ChannelRequest;
-import org.example.finflowbackend.payment.channel.ChannelResult;
-import org.example.finflowbackend.payment.channel.PaymentChannel;
-import org.example.finflowbackend.payment.channel.PaymentChannelRouter;
-import org.example.finflowbackend.payment.dto.PaymentOrderCreateRequest;
+import org.example.finflowbackend.payment.api.PaymentStatus;
+import org.example.finflowbackend.payment.api.PaymentOrderCreateRequest;
 import org.example.finflowbackend.payment.dto.PaymentOrderDetailResponse;
-import org.example.finflowbackend.payment.dto.PaymentOrderResponse;
+import org.example.finflowbackend.payment.api.PaymentOrderResponse;
 import org.example.finflowbackend.payment.entity.PaymentOrder;
-import org.example.finflowbackend.payment.risk.RiskCheckContext;
-import org.example.finflowbackend.payment.risk.RiskChecker;
+import org.example.finflowbackend.risk.api.RiskDecisionApi;
+import org.example.finflowbackend.risk.api.RiskDecisionResponse;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -31,20 +31,19 @@ import static org.mockito.Mockito.when;
 class PaymentProcessServiceTest {
 
     private final PaymentOrderService paymentOrderService = mock(PaymentOrderService.class);
-    private final RiskChecker riskChecker = mock(RiskChecker.class);
-    private final PaymentChannelRouter channelRouter = mock(PaymentChannelRouter.class);
-    private final PaymentChannel channel = mock(PaymentChannel.class);
+    private final RiskDecisionApi riskDecision = mock(RiskDecisionApi.class);
+    private final ChannelOperationsApi channelOperations = mock(ChannelOperationsApi.class);
 
     private final PaymentProcessService processService =
-            new PaymentProcessService(paymentOrderService, riskChecker, channelRouter);
+            new PaymentProcessService(paymentOrderService, riskDecision, channelOperations);
 
     @Test
     void createAndProcessRoutesToChannelAndReturnsLatestOrder() {
         stubCreatedOrder();
         when(paymentOrderService.getDetail(7L)).thenReturn(detail("PENDING"));
-        when(riskChecker.check(any())).thenReturn(RiskCheckContext.Decision.allow());
-        when(channelRouter.route("ALIPAY")).thenReturn(channel);
-        when(channel.createPayment(any())).thenReturn(new ChannelResult(true, "MW20261017111111", "PENDING", "受理中"));
+        when(riskDecision.decide(any())).thenReturn(RiskDecisionResponse.allow());
+        when(channelOperations.createPayment(any()))
+                .thenReturn(new ChannelResult("MOCK_WALLET", true, "MW20261017111111", "PENDING", "受理中"));
 
         PaymentOrderCreateRequest request = createRequest();
         PaymentOrderResponse result = processService.createAndProcess(request);
@@ -53,7 +52,7 @@ class PaymentProcessServiceTest {
         assertEquals("PENDING", result.status());
         verify(paymentOrderService).changeStatus(7L, "PENDING", "发起支付，等待渠道受理", "PROCESS");
         ArgumentCaptor<ChannelRequest> captor = ArgumentCaptor.forClass(ChannelRequest.class);
-        verify(channel).createPayment(captor.capture());
+        verify(channelOperations).createPayment(captor.capture());
         assertEquals(10000L, captor.getValue().amount());
         assertEquals("ALIPAY", captor.getValue().paymentMethod());
     }
@@ -61,7 +60,7 @@ class PaymentProcessServiceTest {
     @Test
     void riskRejectionFinalizesOrderAndThrows() {
         stubCreatedOrder();
-        when(riskChecker.check(any())).thenReturn(RiskCheckContext.Decision.reject("黑名单商户"));
+        when(riskDecision.decide(any())).thenReturn(RiskDecisionResponse.reject("黑名单商户"));
 
         BusinessException error = assertThrows(BusinessException.class,
                 () -> processService.createAndProcess(createRequest()));
@@ -70,14 +69,14 @@ class PaymentProcessServiceTest {
         verify(paymentOrderService).changeStatus(7L, "PENDING", "发起支付，等待渠道受理", "PROCESS");
         // BusinessException 携带的是构造时传入的自定义原因
         verify(paymentOrderService).changeStatus(7L, "FAILED", "受理失败: 黑名单商户", "PROCESS");
-        verify(channelRouter, never()).route(any());
+        verify(channelOperations, never()).createPayment(any());
     }
 
     @Test
     void riskReviewSuspendsOrderWithoutChannelRouting() {
         stubCreatedOrder();
-        when(riskChecker.check(any()))
-                .thenReturn(RiskCheckContext.Decision.review("风险分 30 达到审核阈值 30"));
+        when(riskDecision.decide(any()))
+                .thenReturn(RiskDecisionResponse.review("风险分 30 达到审核阈值 30"));
 
         PaymentOrderResponse result = processService.createAndProcess(createRequest());
 
@@ -85,7 +84,7 @@ class PaymentProcessServiceTest {
         verify(paymentOrderService).changeStatus(7L, "PENDING", "发起支付，等待渠道受理", "PROCESS");
         verify(paymentOrderService).changeStatus(eq(7L), eq("REVIEW"),
                 eq("风控待人工审核: 风险分 30 达到审核阈值 30"), eq("RISK"));
-        verify(channelRouter, never()).route(any());
+        verify(channelOperations, never()).createPayment(any());
         assertEquals(7L, result.id());
     }
 
@@ -93,16 +92,15 @@ class PaymentProcessServiceTest {
     void reviewApproveResumesChannelAcceptance() {
         when(paymentOrderService.getDetail(7L)).thenReturn(detail("PENDING"));
         when(paymentOrderService.get(7L)).thenReturn(response("PENDING"));
-        when(channelRouter.route("ALIPAY")).thenReturn(channel);
-        when(channel.createPayment(any()))
-                .thenReturn(new ChannelResult(true, "MW20261017123456", "PENDING", "受理中"));
+        when(channelOperations.createPayment(any()))
+                .thenReturn(new ChannelResult("MOCK_WALLET", true, "MW20261017123456", "PENDING", "受理中"));
 
         processService.resumeAfterReview(7L, true, "admin", "大额订单人工放行");
 
         // 通过后回 PENDING 并直接渠道路由（人工放行即风控结论，不再重查风控）
         verify(paymentOrderService).changeStatus(7L, "PENDING", "风控人工审核通过: 大额订单人工放行", "admin");
-        verify(riskChecker, never()).check(any());
-        verify(channel).createPayment(any());
+        verify(riskDecision, never()).decide(any());
+        verify(channelOperations).createPayment(any());
     }
 
     @Test
@@ -110,13 +108,15 @@ class PaymentProcessServiceTest {
         processService.resumeAfterReview(7L, false, "admin", "确认欺诈订单");
 
         verify(paymentOrderService).changeStatus(7L, "FAILED", "风控人工审核拒绝: 确认欺诈订单", "admin");
-        verify(channelRouter, never()).route(any());
+        verify(channelOperations, never()).createPayment(any());
     }
 
     @Test
     void reviewApproveChannelFailureFinalizesOrder() {
         when(paymentOrderService.getDetail(7L)).thenReturn(detail("PENDING"));
-        when(channelRouter.route("ALIPAY")).thenThrow(new BusinessException(PaymentErrorCode.CHANNEL_NOT_FOUND));
+        when(paymentOrderService.get(7L)).thenReturn(response("PENDING"));
+        when(channelOperations.createPayment(any()))
+                .thenThrow(new BusinessException(ChannelErrorCode.CHANNEL_NOT_FOUND));
 
         assertThrows(BusinessException.class, () -> processService.resumeAfterReview(7L, true, "admin", null));
 
@@ -126,8 +126,9 @@ class PaymentProcessServiceTest {
     @Test
     void channelRoutingFailureFinalizesOrderAndRethrows() {
         stubCreatedOrder();
-        when(riskChecker.check(any())).thenReturn(RiskCheckContext.Decision.allow());
-        when(channelRouter.route("ALIPAY")).thenThrow(new BusinessException(PaymentErrorCode.CHANNEL_NOT_FOUND));
+        when(riskDecision.decide(any())).thenReturn(RiskDecisionResponse.allow());
+        when(channelOperations.createPayment(any()))
+                .thenThrow(new BusinessException(ChannelErrorCode.CHANNEL_NOT_FOUND));
 
         assertThrows(BusinessException.class, () -> processService.createAndProcess(createRequest()));
 
@@ -137,9 +138,9 @@ class PaymentProcessServiceTest {
     @Test
     void channelRejectionFinalizesOrderAndRethrows() {
         stubCreatedOrder();
-        when(riskChecker.check(any())).thenReturn(RiskCheckContext.Decision.allow());
-        when(channelRouter.route("ALIPAY")).thenReturn(channel);
-        when(channel.createPayment(any())).thenReturn(new ChannelResult(false, null, null, "渠道停用"));
+        when(riskDecision.decide(any())).thenReturn(RiskDecisionResponse.allow());
+        when(channelOperations.createPayment(any()))
+                .thenReturn(new ChannelResult("MOCK_WALLET", false, null, null, "渠道停用"));
 
         assertThrows(BusinessException.class, () -> processService.createAndProcess(createRequest()));
 
@@ -154,8 +155,8 @@ class PaymentProcessServiceTest {
 
         assertEquals("PAID", result.status());
         verify(paymentOrderService, never()).changeStatus(any(), any(), any(), any());
-        verify(riskChecker, never()).check(any());
-        verify(channelRouter, never()).route(any());
+        verify(riskDecision, never()).decide(any());
+        verify(channelOperations, never()).createPayment(any());
     }
 
     private void stubCreatedOrder() {

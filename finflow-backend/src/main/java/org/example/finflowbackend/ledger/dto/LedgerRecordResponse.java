@@ -1,5 +1,6 @@
 package org.example.finflowbackend.ledger.dto;
 
+import org.example.finflowbackend.ledger.api.LedgerEntry;
 import org.example.finflowbackend.ledger.entity.AccountLedger;
 
 import java.time.LocalDateTime;
@@ -15,5 +16,11 @@ public record LedgerRecordResponse(Long id, Long accountId, String bizType, Stri
         return new LedgerRecordResponse(ledger.getId(), ledger.getAccountId(), ledger.getBizType(),
                 ledger.getBizNo(), ledger.getAmount(), ledger.getBalanceBefore(), ledger.getBalanceAfter(),
                 ledger.getCurrency(), ledger.getSource(), ledger.getRemark(), ledger.getCreatedAt());
+    }
+
+    public static LedgerRecordResponse from(LedgerEntry entry) {
+        return new LedgerRecordResponse(entry.id(), entry.accountId(), entry.bizType(), entry.bizNo(),
+                entry.amount(), entry.balanceBefore(), entry.balanceAfter(), entry.currency(),
+                entry.source(), entry.remark(), entry.createdAt());
     }
 }

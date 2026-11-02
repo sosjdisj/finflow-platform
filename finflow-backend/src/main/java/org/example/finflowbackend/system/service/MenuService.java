@@ -1,7 +1,7 @@
 package org.example.finflowbackend.system.service;
 
 import org.example.finflowbackend.system.dto.MenuCreateRequest;
-import org.example.finflowbackend.system.dto.MenuTreeNode;
+import org.example.finflowbackend.system.api.MenuTreeNode;
 import org.example.finflowbackend.system.dto.MenuUpdateRequest;
 
 import java.util.List;

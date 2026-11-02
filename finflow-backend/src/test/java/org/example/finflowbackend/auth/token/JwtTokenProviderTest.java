@@ -2,6 +2,7 @@ package org.example.finflowbackend.auth.token;
 
 import io.jsonwebtoken.JwtException;
 import org.example.finflowbackend.auth.entity.SysUser;
+import org.example.finflowbackend.common.context.CurrentUser;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;

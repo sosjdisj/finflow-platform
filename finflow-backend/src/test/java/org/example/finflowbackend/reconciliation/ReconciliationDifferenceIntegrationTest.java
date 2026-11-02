@@ -1,19 +1,19 @@
 package org.example.finflowbackend.reconciliation;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
-import org.example.finflowbackend.account.AccountOwnerType;
-import org.example.finflowbackend.account.entity.Account;
+import org.example.finflowbackend.account.api.AccountOwnerType;
+import org.example.finflowbackend.account.api.AccountSnapshot;
 import org.example.finflowbackend.account.service.AccountService;
+import org.example.finflowbackend.channel.entity.PaymentTransaction;
+import org.example.finflowbackend.channel.mapper.PaymentTransactionMapper;
 import org.example.finflowbackend.common.exception.BusinessException;
 import org.example.finflowbackend.ledger.entity.AccountLedger;
 import org.example.finflowbackend.ledger.mapper.AccountLedgerMapper;
 import org.example.finflowbackend.ledger.service.LedgerService;
 import org.example.finflowbackend.payment.entity.PaymentOrder;
 import org.example.finflowbackend.payment.entity.PaymentOrderStateLog;
-import org.example.finflowbackend.payment.entity.PaymentTransaction;
 import org.example.finflowbackend.payment.mapper.PaymentOrderMapper;
 import org.example.finflowbackend.payment.mapper.PaymentOrderStateLogMapper;
-import org.example.finflowbackend.payment.mapper.PaymentTransactionMapper;
 import org.example.finflowbackend.reconciliation.entity.ReconciliationBillItem;
 import org.example.finflowbackend.reconciliation.entity.ReconciliationDifference;
 import org.example.finflowbackend.reconciliation.entity.ReconciliationRecord;
@@ -186,19 +186,19 @@ class ReconciliationDifferenceIntegrationTest extends IntegrationTestBase {
         assertEquals(ReconciliationDifferenceStatus.CONFIRMED.name(), confirmed.getStatus());
 
         // 3. 执行处理：商户结算户调减 100（走 S19 调账入口），处理成功即关闭
-        Account account = accountService.getOrCreate(AccountOwnerType.MERCHANT, merchantId, "CNY");
-        ledgerService.credit(account.getId(), "PAYMENT", "FIT" + uniq(), 10000, "CONSOLE", "预置余额");
-        long balanceBefore = accountService.getAccount(account.getId()).getAvailableBalance();
+        AccountSnapshot account = accountService.getOrCreate(AccountOwnerType.MERCHANT, merchantId, "CNY");
+        ledgerService.credit(account.id(), "PAYMENT", "FIT" + uniq(), 10000, "CONSOLE", "预置余额");
+        long balanceBefore = accountService.getAccount(account.id()).getAvailableBalance();
 
         ReconciliationDifference closed = differenceService.handle(
-                diff.getId(), account.getId(), -100L, "平台多记，调减商户户 100 分", "it-op");
+                diff.getId(), account.id(), -100L, "平台多记，调减商户户 100 分", "it-op");
 
         assertEquals(ReconciliationDifferenceStatus.CLOSED.name(), closed.getStatus());
         assertNotNull(closed.getLedgerNo());
         assertNotNull(closed.getHandledAt());
 
         // 4. 资金侧断言：余额 -100，存在指向本差异单的 ADJUSTMENT 流水
-        assertEquals(balanceBefore - 100, accountService.getAccount(account.getId()).getAvailableBalance());
+        assertEquals(balanceBefore - 100, accountService.getAccount(account.id()).getAvailableBalance());
         AccountLedger adjustLedger = ledgerMapper.selectOne(Wrappers.<AccountLedger>query()
                 .eq("biz_no", closed.getLedgerNo()));
         assertEquals("ADJUSTMENT", adjustLedger.getBizType());

@@ -2,7 +2,7 @@ package org.example.finflowbackend.refund.service;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.example.finflowbackend.common.exception.BusinessException;
-import org.example.finflowbackend.refund.RefundErrorCode;
+import org.example.finflowbackend.refund.api.RefundErrorCode;
 import org.example.finflowbackend.refund.RefundStatus;
 import org.example.finflowbackend.refund.entity.RefundOrder;
 import org.example.finflowbackend.refund.entity.RefundOrderStateLog;

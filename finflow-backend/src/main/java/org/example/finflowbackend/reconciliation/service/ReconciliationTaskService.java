@@ -2,17 +2,16 @@ package org.example.finflowbackend.reconciliation.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import org.example.finflowbackend.channel.api.ChannelConfigApi;
 import org.example.finflowbackend.common.api.PageResponse;
 import org.example.finflowbackend.common.exception.BusinessException;
-import org.example.finflowbackend.payment.service.ChannelConfigService;
 import org.example.finflowbackend.reconciliation.ReconciliationErrorCode;
 import org.example.finflowbackend.reconciliation.ReconciliationStatus;
 import org.example.finflowbackend.reconciliation.entity.ReconciliationTask;
 import org.example.finflowbackend.reconciliation.mapper.ReconciliationTaskMapper;
-import org.example.finflowbackend.system.file.FileBizType;
-import org.example.finflowbackend.system.file.FileObjectResponse;
-import org.example.finflowbackend.system.file.FileObjectService;
-import org.example.finflowbackend.system.file.FileStorage;
+import org.example.finflowbackend.system.api.file.FileBizType;
+import org.example.finflowbackend.system.api.file.FileObjectApi;
+import org.example.finflowbackend.system.api.file.FileObjectResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DuplicateKeyException;
@@ -40,20 +39,17 @@ public class ReconciliationTaskService {
 
     private final ReconciliationTaskMapper taskMapper;
     private final ReconciliationBillStore billStore;
-    private final ChannelConfigService channelConfigService;
-    private final FileObjectService fileObjectService;
-    private final FileStorage fileStorage;
+    private final ChannelConfigApi channelConfigApi;
+    private final FileObjectApi fileObjectApi;
 
     public ReconciliationTaskService(ReconciliationTaskMapper taskMapper,
                                      ReconciliationBillStore billStore,
-                                     ChannelConfigService channelConfigService,
-                                     FileObjectService fileObjectService,
-                                     FileStorage fileStorage) {
+                                     ChannelConfigApi channelConfigApi,
+                                     FileObjectApi fileObjectApi) {
         this.taskMapper = taskMapper;
         this.billStore = billStore;
-        this.channelConfigService = channelConfigService;
-        this.fileObjectService = fileObjectService;
-        this.fileStorage = fileStorage;
+        this.channelConfigApi = channelConfigApi;
+        this.fileObjectApi = fileObjectApi;
     }
 
     /** 上传渠道账单并同步解析；返回带解析统计的任务。 */
@@ -66,7 +62,7 @@ public class ReconciliationTaskService {
         if (fileName == null || !fileName.toLowerCase().endsWith(".csv")) {
             throw new BusinessException(ReconciliationErrorCode.BILL_FILE_INVALID, "仅支持 CSV 文件");
         }
-        if (!channelConfigService.existsEnabled(channelCode)) {
+        if (!channelConfigApi.existsEnabled(channelCode)) {
             throw new BusinessException(ReconciliationErrorCode.CHANNEL_NOT_FOUND);
         }
         Long exists = taskMapper.selectCount(new LambdaQueryWrapper<ReconciliationTask>()
@@ -82,7 +78,7 @@ public class ReconciliationTaskService {
         task.setBillDate(billDate);
         task.setFileName(fileName);
         // 文件中心（S38）：对象入 MinIO + 登记 file_object 元数据；biz_id 不传（靠 task.file_path 反向关联）
-        FileObjectResponse stored = fileObjectService.upload(file, FileBizType.RECONCILIATION.name(), null, uploaderId);
+        FileObjectResponse stored = fileObjectApi.upload(file, FileBizType.RECONCILIATION.name(), null, uploaderId);
         task.setFilePath(stored.objectKey());
         task.setStatus(ReconciliationStatus.PENDING.name());
         task.setTotalRows(0);
@@ -106,7 +102,7 @@ public class ReconciliationTaskService {
 
     /** 从对象存储读账单为字符流（UTF-8）；调用方负责关闭。 */
     private Reader readerOf(String objectKey) {
-        return new InputStreamReader(fileStorage.get(objectKey), StandardCharsets.UTF_8);
+        return new InputStreamReader(fileObjectApi.openByObjectKey(objectKey), StandardCharsets.UTF_8);
     }
 
     /** 解析失败标 FAILED（独立单条更新）；标记失败不吞原异常，仅告警。 */

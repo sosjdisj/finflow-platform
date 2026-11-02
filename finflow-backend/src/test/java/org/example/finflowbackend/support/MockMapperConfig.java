@@ -4,6 +4,8 @@ import org.example.finflowbackend.account.mapper.AccountMapper;
 import org.example.finflowbackend.auth.mapper.SysLoginLogMapper;
 import org.example.finflowbackend.auth.mapper.SysRefreshTokenMapper;
 import org.example.finflowbackend.auth.mapper.SysUserMapper;
+import org.example.finflowbackend.channel.mapper.PaymentChannelMapper;
+import org.example.finflowbackend.channel.mapper.PaymentTransactionMapper;
 import org.example.finflowbackend.ledger.mapper.AccountLedgerMapper;
 import org.example.finflowbackend.merchant.mapper.MerchantApiKeyMapper;
 import org.example.finflowbackend.merchant.mapper.MerchantMapper;
@@ -12,10 +14,8 @@ import org.example.finflowbackend.merchant.mapper.MerchantRateMapper;
 import org.example.finflowbackend.merchant.mapper.MerchantSettleAccountMapper;
 import org.example.finflowbackend.merchant.mapper.MerchantStatusLogMapper;
 import org.example.finflowbackend.payment.mapper.PaymentCallbackMapper;
-import org.example.finflowbackend.payment.mapper.PaymentChannelMapper;
 import org.example.finflowbackend.payment.mapper.PaymentOrderMapper;
 import org.example.finflowbackend.payment.mapper.PaymentOrderStateLogMapper;
-import org.example.finflowbackend.payment.mapper.PaymentTransactionMapper;
 import org.example.finflowbackend.refund.mapper.RefundOrderMapper;
 import org.example.finflowbackend.refund.mapper.RefundOrderStateLogMapper;
 import org.example.finflowbackend.clearing.mapper.ClearingDetailMapper;
@@ -233,6 +233,11 @@ public class MockMapperConfig {
     }
 
     @Bean
+    public org.example.finflowbackend.risk.mapper.RiskRuleVersionMapper riskRuleVersionMapper() {
+        return Mockito.mock(org.example.finflowbackend.risk.mapper.RiskRuleVersionMapper.class);
+    }
+
+    @Bean
     public org.example.finflowbackend.webhook.mapper.WebhookEventMapper webhookEventMapper() {
         return Mockito.mock(org.example.finflowbackend.webhook.mapper.WebhookEventMapper.class);
     }
@@ -250,6 +255,12 @@ public class MockMapperConfig {
     @Bean
     public org.example.finflowbackend.notification.mapper.NotificationTemplateMapper notificationTemplateMapper() {
         return Mockito.mock(org.example.finflowbackend.notification.mapper.NotificationTemplateMapper.class);
+    }
+
+    // M16 通知配置投影
+    @Bean
+    public org.example.finflowbackend.notify.mapper.NotifyMerchantConfigMapper notifyMerchantConfigMapper() {
+        return Mockito.mock(org.example.finflowbackend.notify.mapper.NotifyMerchantConfigMapper.class);
     }
 
     @Bean
@@ -271,5 +282,11 @@ public class MockMapperConfig {
     @Bean
     public org.example.finflowbackend.system.file.FileObjectMapper fileObjectMapper() {
         return Mockito.mock(org.example.finflowbackend.system.file.FileObjectMapper.class);
+    }
+
+    // M12 OpenAPI 配额（M15 跑健康检查上下文时补齐缺失替身）
+    @Bean
+    public org.example.finflowbackend.openapi.mapper.MerchantOpenApiQuotaMapper merchantOpenApiQuotaMapper() {
+        return Mockito.mock(org.example.finflowbackend.openapi.mapper.MerchantOpenApiQuotaMapper.class);
     }
 }

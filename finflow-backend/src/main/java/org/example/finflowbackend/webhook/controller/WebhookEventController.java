@@ -3,9 +3,9 @@ package org.example.finflowbackend.webhook.controller;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.example.finflowbackend.common.api.ApiResponse;
 import org.example.finflowbackend.common.api.PageResponse;
+import org.example.finflowbackend.webhook.api.WebhookAdminApi;
 import org.example.finflowbackend.webhook.dto.WebhookEventDetailResponse;
 import org.example.finflowbackend.webhook.dto.WebhookEventResponse;
-import org.example.finflowbackend.webhook.service.WebhookEventService;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -16,16 +16,17 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * Webhook 事件管理接口（S32）。权限编码与 sys_permission 初始化数据一一对应（V28）。
+ * M16：数据随通知服务拆出，这里只依赖 {@link WebhookAdminApi}，local / remote 由开关切换。
  */
 @RestController
 @Tag(name = "Webhook 事件")
 @RequestMapping("/api/v1/webhooks/events")
 public class WebhookEventController {
 
-    private final WebhookEventService eventService;
+    private final WebhookAdminApi adminApi;
 
-    public WebhookEventController(WebhookEventService eventService) {
-        this.eventService = eventService;
+    public WebhookEventController(WebhookAdminApi adminApi) {
+        this.adminApi = adminApi;
     }
 
     @GetMapping
@@ -35,18 +36,18 @@ public class WebhookEventController {
                                                                 @RequestParam(required = false) Long merchantId,
                                                                 @RequestParam(required = false) String status,
                                                                 @RequestParam(required = false) String eventType) {
-        return ApiResponse.ok(eventService.page(page, size, merchantId, status, eventType));
+        return ApiResponse.ok(adminApi.page(page, size, merchantId, status, eventType));
     }
 
     @GetMapping("/{id}")
     @PreAuthorize("hasAuthority('webhook:event:list')")
     public ApiResponse<WebhookEventDetailResponse> detail(@PathVariable Long id) {
-        return ApiResponse.ok(eventService.detail(id));
+        return ApiResponse.ok(adminApi.detail(id));
     }
 
     @PostMapping("/{id}/retry")
     @PreAuthorize("hasAuthority('webhook:event:retry')")
     public ApiResponse<WebhookEventResponse> retry(@PathVariable Long id) {
-        return ApiResponse.ok(eventService.manualRetry(id));
+        return ApiResponse.ok(adminApi.manualRetry(id));
     }
 }

@@ -2,19 +2,19 @@ package org.example.finflowbackend.refund.service;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import org.example.finflowbackend.channel.api.ChannelOperationsApi;
+import org.example.finflowbackend.channel.api.ChannelRequest;
+import org.example.finflowbackend.channel.api.ChannelResult;
+import org.example.finflowbackend.channel.api.PaymentTransactionApi;
 import org.example.finflowbackend.common.api.PageResponse;
 import org.example.finflowbackend.common.exception.BusinessException;
-import org.example.finflowbackend.payment.channel.ChannelRequest;
-import org.example.finflowbackend.payment.channel.ChannelResult;
-import org.example.finflowbackend.payment.channel.PaymentChannel;
-import org.example.finflowbackend.payment.channel.PaymentChannelRouter;
-import org.example.finflowbackend.payment.channel.RefundResultHandler;
-import org.example.finflowbackend.payment.dto.PaymentOrderResponse;
-import org.example.finflowbackend.payment.service.PaymentOrderService;
-import org.example.finflowbackend.payment.service.PaymentTransactionService;
-import org.example.finflowbackend.payment.entity.PaymentOrder;
-import org.example.finflowbackend.payment.PaymentStatus;
-import org.example.finflowbackend.refund.RefundErrorCode;
+import org.example.finflowbackend.payment.api.PaymentOrderApi;
+import org.example.finflowbackend.payment.api.PaymentOrderResponse;
+import org.example.finflowbackend.payment.api.PaymentOrderSnapshot;
+import org.example.finflowbackend.payment.api.PaymentStatus;
+import org.example.finflowbackend.payment.api.RefundResultHandler;
+import org.example.finflowbackend.refund.api.RefundErrorCode;
+import org.example.finflowbackend.refund.api.RefundOrderSnapshot;
 import org.example.finflowbackend.refund.RefundStatus;
 import org.example.finflowbackend.refund.dto.RefundCreateRequest;
 import org.example.finflowbackend.refund.dto.RefundOrderDetailResponse;
@@ -52,51 +52,65 @@ public class RefundServiceImpl implements RefundService, RefundResultHandler {
 
     private final RefundOrderMapper refundMapper;
     private final RefundOrderStateLogMapper stateLogMapper;
-    private final PaymentOrderService paymentOrderService;
-    private final PaymentTransactionService transactionService;
-    private final PaymentChannelRouter channelRouter;
+    private final PaymentOrderApi paymentOrderApi;
+    private final PaymentTransactionApi paymentTransactionApi;
+    private final ChannelOperationsApi channelOperations;
     private final RefundStatusService refundStatusService;
 
     public RefundServiceImpl(RefundOrderMapper refundMapper, RefundOrderStateLogMapper stateLogMapper,
-                             PaymentOrderService paymentOrderService, PaymentTransactionService transactionService,
-                             PaymentChannelRouter channelRouter, RefundStatusService refundStatusService) {
+                             PaymentOrderApi paymentOrderApi, PaymentTransactionApi paymentTransactionApi,
+                             ChannelOperationsApi channelOperations, RefundStatusService refundStatusService) {
         this.refundMapper = refundMapper;
         this.stateLogMapper = stateLogMapper;
-        this.paymentOrderService = paymentOrderService;
-        this.transactionService = transactionService;
-        this.channelRouter = channelRouter;
+        this.paymentOrderApi = paymentOrderApi;
+        this.paymentTransactionApi = paymentTransactionApi;
+        this.channelOperations = channelOperations;
         this.refundStatusService = refundStatusService;
     }
 
     @Override
     public RefundOrderResponse create(RefundCreateRequest request, String operator) {
         // ① 行锁占用可退额度（自身事务提交）：状态与剩余可退校验、申请即占用、首笔 PAID→REFUNDING
-        PaymentOrder order = paymentOrderService.reserveRefundQuota(request.orderId(), request.amount(), operator);
+        PaymentOrderSnapshot order = paymentOrderApi.reserveRefundQuota(request.orderId(), request.amount(), operator);
         // ② 落退款单（单条 insert 原子）；失败补偿释放额度，防止额度泄漏
         RefundOrder refund;
         try {
             refund = insertApplying(order, request, operator);
         } catch (RuntimeException e) {
-            paymentOrderService.releaseRefundQuota(request.orderId(), request.amount());
+            paymentOrderApi.releaseRefundQuota(request.orderId(), request.amount());
             throw e;
         }
         // ③ 渠道受理（事务外，同 S15 编排；受理失败退款单终态化并释放额度）
         try {
-            PaymentChannel channel = channelRouter.route(order.getPaymentMethod());
             // 渠道退款需原支付渠道单号：从该订单的 PAYMENT 交互留痕取
-            String channelOrderNo = transactionService.findPaymentChannelOrderNo(order.getId());
-            ChannelResult result = channel.refund(new ChannelRequest(order.getId(), order.getPlatformOrderNo(),
-                    order.getMerchantOrderNo(), channelOrderNo, request.amount(), order.getPaymentMethod(),
-                    order.getSubject(), refund.getRefundNo()));
+            String channelOrderNo = paymentTransactionApi.findPaymentChannelOrderNo(order.id());
+            ChannelResult result = channelOperations.refund(new ChannelRequest(order.id(), order.platformOrderNo(),
+                    order.merchantOrderNo(), channelOrderNo, request.amount(), order.paymentMethod(),
+                    order.subject(), refund.getRefundNo()));
             if (!result.accepted()) {
                 throw new BusinessException(RefundErrorCode.CHANNEL_REFUND_REJECTED, result.message());
             }
-            refundStatusService.markAccepted(refund.getId(), channel.channelCode(), result.channelOrderNo());
+            refundStatusService.markAccepted(refund.getId(), result.channelCode(), result.channelOrderNo());
             return RefundOrderResponse.from(requireRefund(refund.getId()));
         } catch (BusinessException e) {
             failSafely(refund, "受理失败: " + e.getMessage(), operator);
             throw e;
         }
+    }
+
+    @Override
+    public RefundOrderSnapshot createRefund(Long orderId, long amount, String reason, String operator) {
+        return RefundOrderSnapshot.from(create(new RefundCreateRequest(orderId, amount, reason), operator));
+    }
+
+    @Override
+    public RefundOrderSnapshot findByRefundNo(String refundNo) {
+        RefundOrder refund = refundNo == null || refundNo.isBlank() ? null
+                : refundMapper.selectOne(Wrappers.<RefundOrder>query().eq("refund_no", refundNo));
+        if (refund == null) {
+            throw new BusinessException(RefundErrorCode.REFUND_NOT_FOUND);
+        }
+        return RefundOrderSnapshot.from(RefundOrderResponse.from(refund));
     }
 
     @Override
@@ -125,7 +139,7 @@ public class RefundServiceImpl implements RefundService, RefundResultHandler {
     }
 
     /**
-     * 渠道退款结果回调（payment 模块 ChannelCallbackHandler 委托）。
+     * 渠道退款结果回调（payment 模块 ChannelCallbackService 委托）。
      * 同一事务内完成：退款单终态化 + 支付订单额度释放/退满联动；事件由推进组件在事务提交后发布。
      * 回调可能先于受理响应落库（APPLYING 竞态），此时先补受理（回填渠道要素）再处理结果；
      * 已终态（SUCCESS/FAILED/CLOSED）为重复回调，幂等忽略。
@@ -161,12 +175,12 @@ public class RefundServiceImpl implements RefundService, RefundResultHandler {
             refundStatusService.transition(refund.getId(), RefundStatus.SUCCESS,
                     "渠道回调退款成功: " + channelRefundNo, "CHANNEL:" + channelCode);
             // 退满联动 REFUNDING→REFUNDED（同事务，行锁内判断）
-            paymentOrderService.markFullyRefundedIfNeeded(orderId, refundNo, "REFUND:" + refundNo);
+            paymentOrderApi.markFullyRefundedIfNeeded(orderId, refundNo, "REFUND:" + refundNo);
             log.info("[退款回调] 退款成功: refundNo={}, amount={}", refundNo, refund.getRefundAmount());
         } else {
             refundStatusService.transition(refund.getId(), RefundStatus.FAILED, message, "CHANNEL:" + channelCode);
             // 释放占用额度；无其余在途退款时支付订单回退 PAID
-            paymentOrderService.releaseRefundQuota(orderId, refund.getRefundAmount());
+            paymentOrderApi.releaseRefundQuota(orderId, refund.getRefundAmount());
             revertToPaidIfNoInflight(orderId, refundNo);
             log.info("[退款回调] 退款失败: refundNo={}, reason={}", refundNo, message);
         }
@@ -186,9 +200,9 @@ public class RefundServiceImpl implements RefundService, RefundResultHandler {
         if (inflight != null && inflight > 0) {
             return;
         }
-        PaymentOrderResponse order = paymentOrderService.get(orderId);
+        PaymentOrderResponse order = paymentOrderApi.get(orderId);
         if (order.refundedAmount() < order.amount()) {
-            paymentOrderService.changeStatus(orderId, PaymentStatus.PAID.name(),
+            paymentOrderApi.changeStatus(orderId, PaymentStatus.PAID.name(),
                     "退款失败释放额度，无在途退款: " + failedRefundNo, "REFUND:" + failedRefundNo);
         }
     }
@@ -201,20 +215,22 @@ public class RefundServiceImpl implements RefundService, RefundResultHandler {
                 return;
             }
             refundStatusService.transition(refund.getId(), RefundStatus.FAILED, reason, operator);
-            paymentOrderService.releaseRefundQuota(refund.getOrderId(), refund.getRefundAmount());
+            paymentOrderApi.releaseRefundQuota(refund.getOrderId(), refund.getRefundAmount());
+            // 受理失败且无其他在途退款时，支付订单从 REFUNDING 回退 PAID（与回调失败路径一致）
+            revertToPaidIfNoInflight(refund.getOrderId(), refund.getRefundNo());
         } catch (BusinessException e) {
             log.warn("退款受理失败后终态化冲突: refundNo={}", refund.getRefundNo(), e);
         }
     }
 
-    private RefundOrder insertApplying(PaymentOrder order, RefundCreateRequest request, String operator) {
+    private RefundOrder insertApplying(PaymentOrderSnapshot order, RefundCreateRequest request, String operator) {
         RefundOrder refund = new RefundOrder();
         refund.setRefundNo(nextRefundNo());
-        refund.setOrderId(order.getId());
-        refund.setMerchantId(order.getMerchantId());
-        refund.setPlatformOrderNo(order.getPlatformOrderNo());
+        refund.setOrderId(order.id());
+        refund.setMerchantId(order.merchantId());
+        refund.setPlatformOrderNo(order.platformOrderNo());
         refund.setRefundAmount(request.amount());
-        refund.setCurrency(order.getCurrency());
+        refund.setCurrency(order.currency());
         refund.setReason(request.reason());
         refund.setStatus(RefundStatus.APPLYING.name());
         refund.setOperator(operator);

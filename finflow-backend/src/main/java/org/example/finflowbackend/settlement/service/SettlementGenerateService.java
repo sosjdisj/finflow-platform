@@ -1,8 +1,7 @@
 package org.example.finflowbackend.settlement.service;
 
-import com.baomidou.mybatisplus.core.toolkit.Wrappers;
-import org.example.finflowbackend.clearing.entity.ClearingOrder;
-import org.example.finflowbackend.clearing.mapper.ClearingOrderMapper;
+import org.example.finflowbackend.clearing.api.ClearingOrderSnapshot;
+import org.example.finflowbackend.clearing.api.ClearingQueryApi;
 import org.example.finflowbackend.common.lock.RedisLockService;
 import org.example.finflowbackend.settlement.entity.SettlementOrder;
 import org.example.finflowbackend.settlement.mapper.SettlementOrderMapper;
@@ -33,14 +32,14 @@ public class SettlementGenerateService {
     static final String LOCK_KEY_PREFIX = "finflow:settle:generate:";
     private static final Duration LOCK_TTL = Duration.ofMinutes(5);
 
-    private final ClearingOrderMapper clearingOrderMapper;
+    private final ClearingQueryApi clearingQueryApi;
     private final SettlementOrderWriter orderWriter;
     private final RedisLockService redisLockService;
 
-    public SettlementGenerateService(ClearingOrderMapper clearingOrderMapper,
+    public SettlementGenerateService(ClearingQueryApi clearingQueryApi,
                                      SettlementOrderWriter orderWriter,
                                      RedisLockService redisLockService) {
-        this.clearingOrderMapper = clearingOrderMapper;
+        this.clearingQueryApi = clearingQueryApi;
         this.orderWriter = orderWriter;
         this.redisLockService = redisLockService;
     }
@@ -59,18 +58,15 @@ public class SettlementGenerateService {
     }
 
     private Integer doGenerate(LocalDate settleDate) {
-        List<ClearingOrder> cleared = clearingOrderMapper.selectList(
-                Wrappers.<ClearingOrder>query()
-                        .eq("settle_date", settleDate)
-                        .eq("status", "CLEARED"));
+        List<ClearingOrderSnapshot> cleared = clearingQueryApi.listClearedBySettleDate(settleDate);
         if (cleared.isEmpty()) {
             log.info("[结算生成] 该日无已清分记录: settleDate={}", settleDate);
             return 0;
         }
-        Map<Long, List<ClearingOrder>> byMerchant = cleared.stream()
-                .collect(Collectors.groupingBy(ClearingOrder::getMerchantId));
+        Map<Long, List<ClearingOrderSnapshot>> byMerchant = cleared.stream()
+                .collect(Collectors.groupingBy(ClearingOrderSnapshot::merchantId));
         int generated = 0;
-        for (Map.Entry<Long, List<ClearingOrder>> entry : byMerchant.entrySet()) {
+        for (Map.Entry<Long, List<ClearingOrderSnapshot>> entry : byMerchant.entrySet()) {
             if (orderWriter.generateOne(entry.getKey(), settleDate, entry.getValue())) {
                 generated++;
             }

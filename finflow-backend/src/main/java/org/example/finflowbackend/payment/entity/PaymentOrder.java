@@ -51,7 +51,7 @@ public class PaymentOrder {
     /** 订单过期时间。 */
     private LocalDateTime expiredAt;
 
-    /** 状态，取值见 {@link org.example.finflowbackend.payment.PaymentStatus}。 */
+    /** 状态，取值见 {@link org.example.finflowbackend.payment.api.PaymentStatus}。 */
     private String status;
 
     private LocalDateTime createdAt;

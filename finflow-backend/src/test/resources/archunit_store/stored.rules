@@ -1,0 +1,6 @@
+#
+#Fri Oct 30 22:15:16 HKT 2026
+rule-1-no-foreign-mapper-or-entity=rule-1-no-foreign-mapper-or-entity
+rule-2-controller-no-foreign-service=rule-2-controller-no-foreign-service
+rule-3-common-no-business-dependency=rule-3-common-no-business-dependency
+rule-4-cross-module-only-via-api=rule-4-cross-module-only-via-api

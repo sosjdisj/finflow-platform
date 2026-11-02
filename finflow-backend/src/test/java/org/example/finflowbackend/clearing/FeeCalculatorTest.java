@@ -1,7 +1,7 @@
 package org.example.finflowbackend.clearing;
 
 import org.example.finflowbackend.clearing.service.FeeCalculator;
-import org.example.finflowbackend.merchant.dto.ClearingFeeRateView;
+import org.example.finflowbackend.merchant.api.ClearingFeeRateView;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;

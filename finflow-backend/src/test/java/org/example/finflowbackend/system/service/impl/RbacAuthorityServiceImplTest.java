@@ -1,6 +1,6 @@
 package org.example.finflowbackend.system.service.impl;
 
-import org.example.finflowbackend.system.dto.MenuTreeNode;
+import org.example.finflowbackend.system.api.MenuTreeNode;
 import org.example.finflowbackend.system.entity.SysPermission;
 import org.example.finflowbackend.system.mapper.SysPermissionMapper;
 import org.example.finflowbackend.system.mapper.SysRoleMapper;

@@ -1,7 +1,7 @@
 package org.example.finflowbackend.settlement.service;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
-import org.example.finflowbackend.clearing.entity.ClearingOrder;
+import org.example.finflowbackend.clearing.api.ClearingOrderSnapshot;
 import org.example.finflowbackend.common.api.ErrorCode;
 import org.example.finflowbackend.common.exception.BusinessException;
 import org.example.finflowbackend.settlement.SettlementErrorCode;
@@ -48,13 +48,13 @@ public class SettlementOrderWriter {
      * 生成一商户一日的结算单。已存在（uk 冲突 / 预查命中）返回 false，其余异常上抛回滚。
      */
     @Transactional
-    public boolean generateOne(Long merchantId, LocalDate settleDate, List<ClearingOrder> clearings) {
+    public boolean generateOne(Long merchantId, LocalDate settleDate, List<ClearingOrderSnapshot> clearings) {
         // 部分生成场景（上次中途失败）：已有结算单则跳过，uk 是最终防线
         if (settlementOrderMapper.selectCount(Wrappers.<SettlementOrder>query()
                 .eq("merchant_id", merchantId).eq("settle_date", settleDate)) > 0) {
             return false;
         }
-        long total = clearings.stream().mapToLong(ClearingOrder::getMerchantIncome).sum();
+        long total = clearings.stream().mapToLong(ClearingOrderSnapshot::merchantIncome).sum();
 
         SettlementOrder order = new SettlementOrder();
         order.setSettleNo(nextSettleNo(settleDate));
@@ -62,7 +62,7 @@ public class SettlementOrderWriter {
         order.setSettleDate(settleDate);
         order.setOrderCount(clearings.size());
         order.setTotalAmount(total);
-        order.setCurrency(clearings.getFirst().getCurrency());
+        order.setCurrency(clearings.getFirst().currency());
         order.setStatus(SettlementStatus.PENDING.name());
         try {
             settlementOrderMapper.insert(order);
@@ -71,15 +71,15 @@ public class SettlementOrderWriter {
             return false;
         }
         long detailSum = 0L;
-        for (ClearingOrder clearing : clearings) {
+        for (ClearingOrderSnapshot clearing : clearings) {
             SettlementDetail detail = new SettlementDetail();
             detail.setSettlementId(order.getId());
-            detail.setClearingId(clearing.getId());
-            detail.setOrderId(clearing.getOrderId());
-            detail.setPayAmount(clearing.getPayAmount());
-            detail.setMerchantIncome(clearing.getMerchantIncome());
+            detail.setClearingId(clearing.id());
+            detail.setOrderId(clearing.orderId());
+            detail.setPayAmount(clearing.payAmount());
+            detail.setMerchantIncome(clearing.merchantIncome());
             settlementDetailMapper.insert(detail);
-            detailSum += clearing.getMerchantIncome();
+            detailSum += clearing.merchantIncome();
         }
         // 汇总校验：明细之和必须等于结算单总额（防复制遗漏，错则整单回滚）
         if (detailSum != total) {

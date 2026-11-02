@@ -1,13 +1,16 @@
 package org.example.finflowbackend.reconciliation;
 
-import org.example.finflowbackend.common.event.DomainEvent;
+import org.example.finflowbackend.channel.api.PaymentTransactionApi;
 import org.example.finflowbackend.common.event.DomainEventPublisher;
 import org.example.finflowbackend.common.exception.BusinessException;
+import org.example.finflowbackend.contract.DomainEvent;
+import org.example.finflowbackend.contract.EventTopics;
+import org.example.finflowbackend.contract.EventTypes;
+import org.example.finflowbackend.contract.ReconciliationAbnormalPayload;
 import org.example.finflowbackend.reconciliation.dto.MatchSummaryResponse;
+import org.example.finflowbackend.reconciliation.dto.MissingInChannelCandidate;
 import org.example.finflowbackend.reconciliation.entity.ReconciliationRecord;
 import org.example.finflowbackend.reconciliation.entity.ReconciliationTask;
-import org.example.finflowbackend.reconciliation.event.ReconciliationAbnormalPayload;
-import org.example.finflowbackend.reconciliation.event.ReconciliationTopics;
 import org.example.finflowbackend.reconciliation.mapper.ReconciliationMatchMapper;
 import org.example.finflowbackend.reconciliation.mapper.ReconciliationRecordMapper;
 import org.example.finflowbackend.reconciliation.mapper.ReconciliationTaskMapper;
@@ -18,11 +21,13 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -40,10 +45,12 @@ class ReconciliationMatchServiceTest {
     private final ReconciliationTaskMapper taskMapper = mock(ReconciliationTaskMapper.class);
     private final ReconciliationRecordMapper recordMapper = mock(ReconciliationRecordMapper.class);
     private final ReconciliationMatchMapper matchMapper = mock(ReconciliationMatchMapper.class);
+    private final PaymentTransactionApi paymentTransactionApi = mock(PaymentTransactionApi.class);
     private final DomainEventPublisher eventPublisher = mock(DomainEventPublisher.class);
 
     private ReconciliationMatchService newService() {
-        return new ReconciliationMatchService(taskMapper, recordMapper, matchMapper, eventPublisher);
+        return new ReconciliationMatchService(taskMapper, recordMapper, matchMapper, paymentTransactionApi,
+                eventPublisher);
     }
 
     private ReconciliationTask task(String status) {
@@ -92,7 +99,7 @@ class ReconciliationMatchServiceTest {
 
         // 先清旧再批量匹配，参数取自任务
         verify(matchMapper).deleteByTaskId(100L);
-        verify(matchMapper).insertMatchResults(100L, LocalDate.of(2026, 10, 17), "MOCK_WALLET");
+        verify(matchMapper).insertMatchResults(100L);
 
         // 汇总回写任务
         ArgumentCaptor<ReconciliationTask> captor = ArgumentCaptor.forClass(ReconciliationTask.class);
@@ -129,10 +136,10 @@ class ReconciliationMatchServiceTest {
         newService().match(100L);
 
         ArgumentCaptor<DomainEvent> events = ArgumentCaptor.forClass(DomainEvent.class);
-        verify(eventPublisher, times(1)).publish(eq(ReconciliationTopics.TOPIC_ABNORMAL),
+        verify(eventPublisher, times(1)).publish(eq(EventTopics.RECONCILIATION_ABNORMAL),
                 eq("100"), events.capture());
         DomainEvent event = events.getValue();
-        assertEquals(ReconciliationTopics.TYPE_RECONCILIATION_DIFFERENCE, event.eventType());
+        assertEquals(EventTypes.RECONCILIATION_DIFFERENCE, event.eventType());
         ReconciliationAbnormalPayload payload = new ObjectMapper().convertValue(
                 event.payload(), ReconciliationAbnormalPayload.class);
         assertEquals(100L, payload.taskId());
@@ -154,6 +161,39 @@ class ReconciliationMatchServiceTest {
         newService().match(100L);
 
         verify(eventPublisher, never()).publish(any(), any(), any());
+    }
+
+    /** M07：MISSING_IN_CHANNEL 的渠道归属由 channel.api 判定，非本渠道订单不写入。 */
+    @Test
+    @SuppressWarnings("unchecked")
+    void insertsMissingInChannelOnlyForOrdersInThisChannel() {
+        ReconciliationTask task = task("COMPLETED");
+        when(taskMapper.selectForUpdate(100L)).thenReturn(task);
+        when(matchMapper.selectMissingInChannelCandidates(100L, LocalDate.of(2026, 10, 17)))
+                .thenReturn(List.of(candidate(11L), candidate(12L)));
+        when(paymentTransactionApi.findChannelOrderNos(anyList(), eq("MOCK_WALLET")))
+                .thenReturn(Map.of(11L, "CH-11"));
+        when(recordMapper.selectCount(any())).thenReturn(0L);
+        when(recordMapper.selectList(any())).thenReturn(List.of());
+
+        newService().match(100L);
+
+        ArgumentCaptor<List<MissingInChannelCandidate>> captor = ArgumentCaptor.forClass(List.class);
+        verify(matchMapper).insertMissingInChannelRecords(eq(100L), captor.capture());
+        List<MissingInChannelCandidate> inserted = captor.getValue();
+        assertEquals(1, inserted.size());
+        assertEquals(11L, inserted.getFirst().getOrderId());
+        assertEquals("CH-11", inserted.getFirst().getChannelOrderNo());
+    }
+
+    private MissingInChannelCandidate candidate(Long orderId) {
+        MissingInChannelCandidate candidate = new MissingInChannelCandidate();
+        candidate.setOrderId(orderId);
+        candidate.setMerchantOrderNo("MO" + orderId);
+        candidate.setPlatformAmount(100L);
+        candidate.setPlatformStatus("PAID");
+        candidate.setPlatformOrderNo("P" + orderId);
+        return candidate;
     }
 
     private ReconciliationRecord record(String result, Long platformAmount, Long billAmount) {

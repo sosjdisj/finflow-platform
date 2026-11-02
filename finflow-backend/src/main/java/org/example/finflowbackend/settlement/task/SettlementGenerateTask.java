@@ -1,8 +1,8 @@
 package org.example.finflowbackend.settlement.task;
 
 import org.example.finflowbackend.settlement.service.SettlementGenerateService;
-import org.example.finflowbackend.system.config.ConfigKeys;
-import org.example.finflowbackend.system.service.ConfigService;
+import org.example.finflowbackend.system.api.ConfigKeys;
+import org.example.finflowbackend.system.api.ConfigApi;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -32,13 +32,13 @@ public class SettlementGenerateTask {
     private static final DateTimeFormatter HH_MM = DateTimeFormatter.ofPattern("HH:mm");
 
     private final SettlementGenerateService generateService;
-    private final ConfigService configService;
+    private final ConfigApi configApi;
     private final StringRedisTemplate redisTemplate;
 
     public SettlementGenerateTask(SettlementGenerateService generateService,
-                                  ConfigService configService, StringRedisTemplate redisTemplate) {
+                                  ConfigApi configApi, StringRedisTemplate redisTemplate) {
         this.generateService = generateService;
-        this.configService = configService;
+        this.configApi = configApi;
         this.redisTemplate = redisTemplate;
     }
 
@@ -73,7 +73,7 @@ public class SettlementGenerateTask {
 
     /** 解析配置的生成时间（HH:mm）；格式坏值记日志返回 null（跳过本轮，不阻塞扫描）。 */
     private LocalTime resolveTargetTime() {
-        String raw = configService.getString(ConfigKeys.SETTLEMENT_GENERATE_TIME);
+        String raw = configApi.getString(ConfigKeys.SETTLEMENT_GENERATE_TIME);
         try {
             return LocalTime.parse(raw, HH_MM);
         } catch (DateTimeParseException e) {

@@ -1,14 +1,14 @@
 package org.example.finflowbackend.ledger.event;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import org.example.finflowbackend.account.AccountOwnerType;
-import org.example.finflowbackend.account.entity.Account;
-import org.example.finflowbackend.account.service.AccountService;
-import org.example.finflowbackend.common.event.DomainEvent;
+import org.example.finflowbackend.account.api.AccountApi;
+import org.example.finflowbackend.account.api.AccountOwnerType;
+import org.example.finflowbackend.account.api.AccountSnapshot;
 import org.example.finflowbackend.common.event.EventDeduplicationService;
+import org.example.finflowbackend.contract.DomainEvent;
+import org.example.finflowbackend.contract.EventTopics;
+import org.example.finflowbackend.contract.PaymentSucceededPayload;
 import org.example.finflowbackend.ledger.service.LedgerService;
-import org.example.finflowbackend.payment.event.PaymentSucceededPayload;
-import org.example.finflowbackend.payment.event.PaymentTopics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DuplicateKeyException;
@@ -33,20 +33,20 @@ public class PaymentLedgerConsumer {
 
     private final EventDeduplicationService deduplicationService;
     private final ObjectMapper objectMapper;
-    private final AccountService accountService;
+    private final AccountApi accountApi;
     private final LedgerService ledgerService;
 
     public PaymentLedgerConsumer(EventDeduplicationService deduplicationService,
                                  ObjectMapper objectMapper,
-                                 AccountService accountService,
+                                 AccountApi accountApi,
                                  LedgerService ledgerService) {
         this.deduplicationService = deduplicationService;
         this.objectMapper = objectMapper;
-        this.accountService = accountService;
+        this.accountApi = accountApi;
         this.ledgerService = ledgerService;
     }
 
-    @KafkaListener(topics = PaymentTopics.TOPIC_SUCCEEDED, groupId = GROUP_ID)
+    @KafkaListener(topics = EventTopics.PAYMENT_SUCCEEDED, groupId = GROUP_ID)
     public void onMessage(String message) {
         handle(message);
     }
@@ -60,10 +60,10 @@ public class PaymentLedgerConsumer {
         }
         PaymentSucceededPayload payload =
                 objectMapper.convertValue(event.payload(), PaymentSucceededPayload.class);
-        Account account = accountService.getOrCreate(
+        AccountSnapshot account = accountApi.getOrCreate(
                 AccountOwnerType.PLATFORM, PLATFORM_OWNER_ID, payload.currency());
         try {
-            ledgerService.credit(account.getId(), "PAYMENT", payload.platformOrderNo(),
+            ledgerService.credit(account.id(), "PAYMENT", payload.platformOrderNo(),
                     payload.amount(), "PAYMENT_EVENT");
         } catch (DuplicateKeyException e) {
             // 库层幂等兜底：Redis 去重窗口外的重投，同订单流水已存在，视为已入账

@@ -2,7 +2,7 @@ package org.example.finflowbackend.system.service.impl;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import org.example.finflowbackend.audit.AuditRecorder;
+import org.example.finflowbackend.audit.api.AuditApi;
 import org.example.finflowbackend.common.api.PageResponse;
 import org.example.finflowbackend.common.exception.BusinessException;
 import org.example.finflowbackend.system.SystemErrorCode;
@@ -36,16 +36,16 @@ public class RoleServiceImpl implements RoleService {
     private final SysRolePermissionMapper rolePermissionMapper;
     private final SysUserRoleMapper userRoleMapper;
     private final SysPermissionMapper permissionMapper;
-    private final AuditRecorder auditRecorder;
+    private final AuditApi auditApi;
 
     public RoleServiceImpl(SysRoleMapper roleMapper, SysRolePermissionMapper rolePermissionMapper,
                            SysUserRoleMapper userRoleMapper, SysPermissionMapper permissionMapper,
-                           AuditRecorder auditRecorder) {
+                           AuditApi auditApi) {
         this.roleMapper = roleMapper;
         this.rolePermissionMapper = rolePermissionMapper;
         this.userRoleMapper = userRoleMapper;
         this.permissionMapper = permissionMapper;
-        this.auditRecorder = auditRecorder;
+        this.auditApi = auditApi;
     }
 
     @Override
@@ -128,7 +128,7 @@ public class RoleServiceImpl implements RoleService {
             rolePermissionMapper.insert(link);
         }
         // 权限变更审计：改前/改后权限 ID 集（S35）
-        auditRecorder.submit(beforeIds, List.copyOf(permissionIds));
+        auditApi.submit(beforeIds, List.copyOf(permissionIds));
     }
 
     private SysRole requireRole(Long id) {

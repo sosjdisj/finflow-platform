@@ -1,6 +1,6 @@
 package org.example.finflowbackend.settlement.service;
 
-import org.example.finflowbackend.audit.AuditRecorder;
+import org.example.finflowbackend.audit.api.AuditApi;
 import org.example.finflowbackend.common.api.ErrorCode;
 import org.example.finflowbackend.common.exception.BusinessException;
 import org.example.finflowbackend.settlement.SettlementStatus;
@@ -29,23 +29,23 @@ public class SettlementExecuteService {
     private final SettlementStatusService statusService;
     private final SettlementPostingService postingService;
     private final SettlementOrderMapper settlementOrderMapper;
-    private final AuditRecorder auditRecorder;
+    private final AuditApi auditApi;
 
     public SettlementExecuteService(SettlementStatusService statusService,
                                     SettlementPostingService postingService,
                                     SettlementOrderMapper settlementOrderMapper,
-                                    AuditRecorder auditRecorder) {
+                                    AuditApi auditApi) {
         this.statusService = statusService;
         this.postingService = postingService;
         this.settlementOrderMapper = settlementOrderMapper;
-        this.auditRecorder = auditRecorder;
+        this.auditApi = auditApi;
     }
 
     /** 审核通过：CALCULATED → APPROVED。 */
     public void approve(Long settlementId, String operator) {
         SettlementOrder before = settlementOrderMapper.selectById(settlementId);
         statusService.transition(settlementId, SettlementStatus.APPROVED, "审核通过", operator);
-        auditRecorder.submit(before, Map.of("status", SettlementStatus.APPROVED.name()));
+        auditApi.submit(before, Map.of("status", SettlementStatus.APPROVED.name()));
     }
 
     /** 执行打款：动账入商户账户。失败标 FAILED 并抛出原错误；FAILED 单可再次调用重试。 */

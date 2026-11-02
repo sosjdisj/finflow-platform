@@ -2,29 +2,30 @@ package org.example.finflowbackend.payment.service.impl;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import org.example.finflowbackend.channel.api.PaymentTransactionApi;
 import org.example.finflowbackend.common.api.ErrorCode;
 import org.example.finflowbackend.common.api.PageResponse;
 import org.example.finflowbackend.common.exception.BusinessException;
-import org.example.finflowbackend.merchant.MerchantStatus;
-import org.example.finflowbackend.merchant.dto.MerchantDetailResponse;
-import org.example.finflowbackend.merchant.service.MerchantService;
+import org.example.finflowbackend.merchant.api.MerchantStatus;
+import org.example.finflowbackend.merchant.api.MerchantDetailResponse;
+import org.example.finflowbackend.merchant.api.MerchantApi;
 import org.example.finflowbackend.payment.PaymentErrorCode;
-import org.example.finflowbackend.payment.PaymentStatus;
-import org.example.finflowbackend.payment.dto.PaymentOrderCreateRequest;
+import org.example.finflowbackend.payment.api.PaymentStatus;
+import org.example.finflowbackend.payment.api.PaymentOrderCreateRequest;
 import org.example.finflowbackend.payment.dto.PaymentOrderDetailResponse;
-import org.example.finflowbackend.payment.dto.PaymentOrderResponse;
+import org.example.finflowbackend.payment.api.PaymentOrderResponse;
 import org.example.finflowbackend.payment.dto.PaymentOrderStateLogResponse;
 import org.example.finflowbackend.payment.dto.PaymentTransactionResponse;
+import org.example.finflowbackend.payment.api.PaymentOrderSnapshot;
 import org.example.finflowbackend.payment.entity.PaymentOrder;
 import org.example.finflowbackend.payment.entity.PaymentOrderStateLog;
 import org.example.finflowbackend.payment.event.PaymentEventPublisher;
 import org.example.finflowbackend.payment.mapper.PaymentOrderMapper;
 import org.example.finflowbackend.payment.mapper.PaymentOrderStateLogMapper;
 import org.example.finflowbackend.payment.service.PaymentOrderService;
-import org.example.finflowbackend.payment.service.PaymentTransactionService;
-import org.example.finflowbackend.refund.RefundErrorCode;
-import org.example.finflowbackend.system.config.ConfigKeys;
-import org.example.finflowbackend.system.service.ConfigService;
+import org.example.finflowbackend.refund.api.RefundErrorCode;
+import org.example.finflowbackend.system.api.ConfigKeys;
+import org.example.finflowbackend.system.api.ConfigApi;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -38,7 +39,7 @@ import java.util.Locale;
 
 /**
  * 支付订单实现。
- * 状态约定集中在 PaymentStatus.MACHINE；跨模块仅经 MerchantService 取商户，不直接读商户表。
+ * 状态约定集中在 PaymentStatus.MACHINE；跨模块仅经 MerchantApi 取商户，不直接读商户表。
  */
 @Service
 public class PaymentOrderServiceImpl implements PaymentOrderService {
@@ -48,17 +49,17 @@ public class PaymentOrderServiceImpl implements PaymentOrderService {
 
     private final PaymentOrderMapper orderMapper;
     private final PaymentOrderStateLogMapper stateLogMapper;
-    private final PaymentTransactionService transactionService;
-    private final MerchantService merchantService;
+    private final PaymentTransactionApi transactionApi;
+    private final MerchantApi merchantService;
     private final PaymentEventPublisher paymentEventPublisher;
-    private final ConfigService configService;
+    private final ConfigApi configService;
 
     public PaymentOrderServiceImpl(PaymentOrderMapper orderMapper, PaymentOrderStateLogMapper stateLogMapper,
-                                   PaymentTransactionService transactionService, MerchantService merchantService,
-                                   PaymentEventPublisher paymentEventPublisher, ConfigService configService) {
+                                   PaymentTransactionApi transactionApi, MerchantApi merchantService,
+                                   PaymentEventPublisher paymentEventPublisher, ConfigApi configService) {
         this.orderMapper = orderMapper;
         this.stateLogMapper = stateLogMapper;
-        this.transactionService = transactionService;
+        this.transactionApi = transactionApi;
         this.merchantService = merchantService;
         this.paymentEventPublisher = paymentEventPublisher;
         this.configService = configService;
@@ -144,7 +145,7 @@ public class PaymentOrderServiceImpl implements PaymentOrderService {
         List<PaymentOrderStateLogResponse> logs = stateLogMapper.selectList(
                         Wrappers.<PaymentOrderStateLog>query().eq("order_id", id).orderByAsc("id"))
                 .stream().map(PaymentOrderStateLogResponse::from).toList();
-        List<PaymentTransactionResponse> transactions = transactionService.listByOrder(id).stream()
+        List<PaymentTransactionResponse> transactions = transactionApi.listByOrder(id).stream()
                 .map(PaymentTransactionResponse::from).toList();
         return new PaymentOrderDetailResponse(PaymentOrderResponse.from(order), logs, transactions);
     }
@@ -215,8 +216,33 @@ public class PaymentOrderServiceImpl implements PaymentOrderService {
     }
 
     @Override
+    public PaymentOrderResponse findByPlatformOrderNo(String platformOrderNo) {
+        return PaymentOrderResponse.from(requireByPlatformOrderNo(platformOrderNo));
+    }
+
+    @Override
     @Transactional
-    public PaymentOrder reserveRefundQuota(Long orderId, long refundAmount, String operator) {
+    public void closeByMerchant(String platformOrderNo, Long merchantId, String operator) {
+        PaymentOrder order = requireByPlatformOrderNo(platformOrderNo);
+        // 越权访问与不存在合并为同一错误码，不暴露他商户订单是否存在
+        if (!order.getMerchantId().equals(merchantId)) {
+            throw new BusinessException(PaymentErrorCode.ORDER_NOT_FOUND);
+        }
+        changeStatus(order.getId(), PaymentStatus.CLOSED.name(), "商户主动关单", operator);
+    }
+
+    private PaymentOrder requireByPlatformOrderNo(String platformOrderNo) {
+        PaymentOrder order = platformOrderNo == null || platformOrderNo.isBlank() ? null
+                : orderMapper.selectOne(Wrappers.<PaymentOrder>query().eq("platform_order_no", platformOrderNo));
+        if (order == null) {
+            throw new BusinessException(PaymentErrorCode.ORDER_NOT_FOUND);
+        }
+        return order;
+    }
+
+    @Override
+    @Transactional
+    public PaymentOrderSnapshot reserveRefundQuota(Long orderId, long refundAmount, String operator) {
         // 行锁读：同订单的退款申请在此串行，防并发超退
         PaymentOrder order = orderMapper.selectForUpdate(orderId);
         if (order == null) {
@@ -238,7 +264,7 @@ public class PaymentOrderServiceImpl implements PaymentOrderService {
             // 首笔退款：进入退款中；已有退款在途时保持 REFUNDING 不重复推进
             changeStatus(orderId, PaymentStatus.REFUNDING.name(), "发起退款，占用可退额度", operator);
         }
-        return order;
+        return PaymentOrderSnapshot.from(order);
     }
 
     @Override

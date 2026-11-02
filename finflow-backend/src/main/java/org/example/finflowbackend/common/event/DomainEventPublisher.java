@@ -1,5 +1,8 @@
 package org.example.finflowbackend.common.event;
 
+import org.apache.kafka.clients.producer.ProducerRecord;
+import org.example.finflowbackend.common.trace.TracePropagation;
+import org.example.finflowbackend.contract.DomainEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -20,10 +23,13 @@ public class DomainEventPublisher {
 
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final ObjectMapper objectMapper;
+    private final TracePropagation tracePropagation;
 
-    public DomainEventPublisher(KafkaTemplate<String, String> kafkaTemplate, ObjectMapper objectMapper) {
+    public DomainEventPublisher(KafkaTemplate<String, String> kafkaTemplate, ObjectMapper objectMapper,
+                                TracePropagation tracePropagation) {
         this.kafkaTemplate = kafkaTemplate;
         this.objectMapper = objectMapper;
+        this.tracePropagation = tracePropagation;
     }
 
     /** 事务提交后发布事件（无事务则立即发布）。 */
@@ -43,7 +49,10 @@ public class DomainEventPublisher {
 
     private void send(String topic, String key, DomainEvent event) {
         String json = objectMapper.writeValueAsString(event);
-        kafkaTemplate.send(topic, key, json);
+        // M15：把当前 span 上下文注入消息头，消费端据此恢复同一个 traceId
+        ProducerRecord<String, String> record = new ProducerRecord<>(topic, key, json);
+        tracePropagation.inject(record.headers());
+        kafkaTemplate.send(record);
         log.info("领域事件已发布: topic={}, key={}, eventType={}, eventId={}",
                 topic, key, event.eventType(), event.eventId());
     }

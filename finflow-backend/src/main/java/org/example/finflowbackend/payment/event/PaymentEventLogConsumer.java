@@ -1,7 +1,8 @@
 package org.example.finflowbackend.payment.event;
 
-import org.example.finflowbackend.common.event.DomainEvent;
 import org.example.finflowbackend.common.event.EventDeduplicationService;
+import org.example.finflowbackend.contract.DomainEvent;
+import org.example.finflowbackend.contract.EventTopics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -28,8 +29,8 @@ public class PaymentEventLogConsumer {
         this.objectMapper = objectMapper;
     }
 
-    @KafkaListener(topics = {PaymentTopics.TOPIC_CREATED, PaymentTopics.TOPIC_SUCCEEDED,
-            PaymentTopics.TOPIC_FAILED}, groupId = GROUP_ID)
+    @KafkaListener(topics = {EventTopics.PAYMENT_CREATED, EventTopics.PAYMENT_SUCCEEDED,
+            EventTopics.PAYMENT_FAILED}, groupId = GROUP_ID)
     public void onMessage(String message) {
         handle(message);
     }

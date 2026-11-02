@@ -1,17 +1,18 @@
 package org.example.finflowbackend.payment.service.impl;
 
+import org.example.finflowbackend.channel.api.PaymentTransactionApi;
 import org.example.finflowbackend.common.exception.BusinessException;
 import org.example.finflowbackend.merchant.MerchantErrorCode;
-import org.example.finflowbackend.merchant.dto.MerchantDetailResponse;
-import org.example.finflowbackend.merchant.dto.MerchantResponse;
+import org.example.finflowbackend.merchant.api.MerchantDetailResponse;
+import org.example.finflowbackend.merchant.api.MerchantResponse;
 import org.example.finflowbackend.merchant.service.MerchantService;
 import org.example.finflowbackend.payment.PaymentErrorCode;
-import org.example.finflowbackend.payment.dto.PaymentOrderCreateRequest;
+import org.example.finflowbackend.payment.api.PaymentOrderCreateRequest;
 import org.example.finflowbackend.payment.entity.PaymentOrder;
 import org.example.finflowbackend.payment.entity.PaymentOrderStateLog;
 import org.example.finflowbackend.payment.mapper.PaymentOrderMapper;
 import org.example.finflowbackend.payment.mapper.PaymentOrderStateLogMapper;
-import org.example.finflowbackend.system.config.ConfigKeys;
+import org.example.finflowbackend.system.api.ConfigKeys;
 import org.example.finflowbackend.system.service.ConfigService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -38,8 +39,8 @@ class PaymentOrderServiceImplTest {
 
     private final PaymentOrderMapper orderMapper = mock(PaymentOrderMapper.class);
     private final PaymentOrderStateLogMapper stateLogMapper = mock(PaymentOrderStateLogMapper.class);
-    private final org.example.finflowbackend.payment.service.PaymentTransactionService transactionService =
-            mock(org.example.finflowbackend.payment.service.PaymentTransactionService.class);
+    private final PaymentTransactionApi transactionService =
+            mock(PaymentTransactionApi.class);
     private final MerchantService merchantService = mock(MerchantService.class);
     private final org.example.finflowbackend.payment.event.PaymentEventPublisher paymentEventPublisher =
             mock(org.example.finflowbackend.payment.event.PaymentEventPublisher.class);

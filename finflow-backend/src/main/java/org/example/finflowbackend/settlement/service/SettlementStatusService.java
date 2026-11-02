@@ -1,15 +1,16 @@
 package org.example.finflowbackend.settlement.service;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
-import org.example.finflowbackend.common.event.DomainEvent;
 import org.example.finflowbackend.common.event.DomainEventPublisher;
 import org.example.finflowbackend.common.exception.BusinessException;
+import org.example.finflowbackend.contract.DomainEvent;
+import org.example.finflowbackend.contract.EventTopics;
+import org.example.finflowbackend.contract.EventTypes;
+import org.example.finflowbackend.contract.SettlementSucceededPayload;
 import org.example.finflowbackend.settlement.SettlementErrorCode;
 import org.example.finflowbackend.settlement.SettlementStatus;
 import org.example.finflowbackend.settlement.entity.SettlementOrder;
 import org.example.finflowbackend.settlement.entity.SettlementOrderStateLog;
-import org.example.finflowbackend.settlement.event.SettlementSucceededPayload;
-import org.example.finflowbackend.settlement.event.SettlementTopics;
 import org.example.finflowbackend.settlement.mapper.SettlementOrderMapper;
 import org.example.finflowbackend.settlement.mapper.SettlementOrderStateLogMapper;
 import org.springframework.stereotype.Service;
@@ -63,9 +64,9 @@ public class SettlementStatusService {
         appendLog(settlementId, from.name(), to.name(), reason, operator);
         // 事务提交后发布；显式传目标状态（CAS 后实体仍停留 fromStatus，S16 踩坑）
         if (to == SettlementStatus.SUCCESS) {
-            eventPublisher.publish(SettlementTopics.TOPIC_SETTLEMENT_SUCCEEDED,
+            eventPublisher.publish(EventTopics.SETTLEMENT_SUCCEEDED,
                     String.valueOf(current.getId()),
-                    DomainEvent.of(SettlementTopics.TYPE_SETTLEMENT_SUCCEEDED,
+                    DomainEvent.of(EventTypes.SETTLEMENT_SUCCEEDED,
                             new SettlementSucceededPayload(current.getSettleNo(), current.getMerchantId(),
                                     current.getSettleDate(), current.getTotalAmount(), current.getCurrency(),
                                     LocalDateTime.now())));

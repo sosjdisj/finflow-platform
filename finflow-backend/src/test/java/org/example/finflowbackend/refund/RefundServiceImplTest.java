@@ -1,14 +1,14 @@
 package org.example.finflowbackend.refund;
 
+import org.example.finflowbackend.channel.api.ChannelErrorCode;
+import org.example.finflowbackend.channel.api.ChannelOperationsApi;
+import org.example.finflowbackend.channel.api.ChannelResult;
+import org.example.finflowbackend.channel.api.PaymentTransactionApi;
 import org.example.finflowbackend.common.exception.BusinessException;
-import org.example.finflowbackend.payment.PaymentErrorCode;
-import org.example.finflowbackend.payment.channel.ChannelResult;
-import org.example.finflowbackend.payment.channel.PaymentChannel;
-import org.example.finflowbackend.payment.channel.PaymentChannelRouter;
-import org.example.finflowbackend.payment.dto.PaymentOrderResponse;
-import org.example.finflowbackend.payment.entity.PaymentOrder;
+import org.example.finflowbackend.payment.api.PaymentOrderResponse;
+import org.example.finflowbackend.payment.api.PaymentOrderSnapshot;
 import org.example.finflowbackend.payment.service.PaymentOrderService;
-import org.example.finflowbackend.payment.service.PaymentTransactionService;
+import org.example.finflowbackend.refund.api.RefundErrorCode;
 import org.example.finflowbackend.refund.dto.RefundCreateRequest;
 import org.example.finflowbackend.refund.dto.RefundOrderResponse;
 import org.example.finflowbackend.refund.entity.RefundOrder;
@@ -46,8 +46,8 @@ class RefundServiceImplTest {
 
     private RefundOrderMapper refundMapper;
     private PaymentOrderService paymentOrderService;
-    private PaymentTransactionService transactionService;
-    private PaymentChannelRouter channelRouter;
+    private PaymentTransactionApi transactionService;
+    private ChannelOperationsApi channelOperations;
     private RefundStatusService refundStatusService;
     private RefundServiceImpl refundService;
 
@@ -55,11 +55,11 @@ class RefundServiceImplTest {
     void setUp() {
         refundMapper = mock(RefundOrderMapper.class);
         paymentOrderService = mock(PaymentOrderService.class);
-        transactionService = mock(PaymentTransactionService.class);
-        channelRouter = mock(PaymentChannelRouter.class);
+        transactionService = mock(PaymentTransactionApi.class);
+        channelOperations = mock(ChannelOperationsApi.class);
         refundStatusService = mock(RefundStatusService.class);
         refundService = new RefundServiceImpl(refundMapper, mock(RefundOrderStateLogMapper.class),
-                paymentOrderService, transactionService, channelRouter, refundStatusService);
+                paymentOrderService, transactionService, channelOperations, refundStatusService);
         // insert 替身回填主键，模拟自增
         doAnswer(inv -> {
             RefundOrder refund = inv.getArgument(0);
@@ -71,10 +71,8 @@ class RefundServiceImplTest {
     @Test
     void createAcceptsAndMovesToProcessing() {
         when(paymentOrderService.reserveRefundQuota(ORDER_ID, 3000L, "admin")).thenReturn(paidOrder());
-        PaymentChannel channel = mock(PaymentChannel.class);
-        when(channelRouter.route("ALIPAY")).thenReturn(channel);
-        when(channel.channelCode()).thenReturn("MOCK_WALLET");
-        when(channel.refund(any())).thenReturn(new ChannelResult(true, "CR1", "PROCESSING", "退款受理中"));
+        when(channelOperations.refund(any()))
+                .thenReturn(new ChannelResult("MOCK_WALLET", true, "CR1", "PROCESSING", "退款受理中"));
         RefundOrder processing = applyingRefund();
         processing.setStatus("PROCESSING");
         when(refundMapper.selectById(REFUND_ID)).thenReturn(processing);
@@ -96,10 +94,11 @@ class RefundServiceImplTest {
     @Test
     void createChannelRejectedFailsRefundAndReleasesQuota() {
         when(paymentOrderService.reserveRefundQuota(ORDER_ID, 3000L, "admin")).thenReturn(paidOrder());
-        PaymentChannel channel = mock(PaymentChannel.class);
-        when(channelRouter.route("ALIPAY")).thenReturn(channel);
-        when(channel.refund(any())).thenReturn(new ChannelResult(false, null, null, "余额不足"));
+        when(channelOperations.refund(any()))
+                .thenReturn(new ChannelResult("MOCK_WALLET", false, null, null, "余额不足"));
         when(refundMapper.selectById(REFUND_ID)).thenReturn(applyingRefund());
+        when(refundMapper.selectCount(any())).thenReturn(0L);
+        when(paymentOrderService.get(ORDER_ID)).thenReturn(orderResponse(10000L, 0L));
 
         BusinessException error = assertThrows(BusinessException.class,
                 () -> refundService.create(new RefundCreateRequest(ORDER_ID, 3000L, null), "admin"));
@@ -108,21 +107,27 @@ class RefundServiceImplTest {
         verify(refundStatusService).transition(eq(REFUND_ID), eq(RefundStatus.FAILED),
                 contains("受理失败"), eq("admin"));
         verify(paymentOrderService).releaseRefundQuota(ORDER_ID, 3000L);
+        // 无在途退款时支付订单从 REFUNDING 回退 PAID
+        verify(paymentOrderService).changeStatus(eq(ORDER_ID), eq("PAID"), contains("退款失败释放额度"), any());
     }
 
     @Test
     void createRouteFailureFailsRefundAndReleasesQuota() {
         when(paymentOrderService.reserveRefundQuota(ORDER_ID, 3000L, "admin")).thenReturn(paidOrder());
-        when(channelRouter.route("ALIPAY"))
-                .thenThrow(new BusinessException(PaymentErrorCode.CHANNEL_NOT_FOUND));
+        when(channelOperations.refund(any()))
+                .thenThrow(new BusinessException(ChannelErrorCode.CHANNEL_NOT_FOUND));
         when(refundMapper.selectById(REFUND_ID)).thenReturn(applyingRefund());
+        // 首次为退款单号查重（0=可用），随后为在途退款计数（1=仍有在途）
+        when(refundMapper.selectCount(any())).thenReturn(0L, 1L);
 
         BusinessException error = assertThrows(BusinessException.class,
                 () -> refundService.create(new RefundCreateRequest(ORDER_ID, 3000L, null), "admin"));
 
-        assertEquals(PaymentErrorCode.CHANNEL_NOT_FOUND, error.getErrorCode());
+        assertEquals(ChannelErrorCode.CHANNEL_NOT_FOUND, error.getErrorCode());
         verify(refundStatusService).transition(eq(REFUND_ID), eq(RefundStatus.FAILED), any(), any());
         verify(paymentOrderService).releaseRefundQuota(ORDER_ID, 3000L);
+        // 仍有其他在途退款时保持 REFUNDING
+        verify(paymentOrderService, never()).changeStatus(any(), any(), any(), any());
     }
 
     @Test
@@ -214,18 +219,9 @@ class RefundServiceImplTest {
         verify(refundStatusService, never()).transition(any(), any(), any(), any());
     }
 
-    private PaymentOrder paidOrder() {
-        PaymentOrder order = new PaymentOrder();
-        order.setId(ORDER_ID);
-        order.setMerchantId(10L);
-        order.setPlatformOrderNo("P20260101000001");
-        order.setAmount(10000L);
-        order.setRefundedAmount(0L);
-        order.setCurrency("CNY");
-        order.setPaymentMethod("ALIPAY");
-        order.setSubject("退款单测商品");
-        order.setStatus("PAID");
-        return order;
+    private PaymentOrderSnapshot paidOrder() {
+        return new PaymentOrderSnapshot(ORDER_ID, 10L, null, "P20260101000001", 10000L, 0L,
+                "CNY", "退款单测商品", "ALIPAY", "PAID");
     }
 
     private RefundOrder applyingRefund() {

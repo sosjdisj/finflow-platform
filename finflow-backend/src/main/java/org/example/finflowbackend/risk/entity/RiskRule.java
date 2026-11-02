@@ -9,12 +9,13 @@ import lombok.Setter;
 import java.time.LocalDateTime;
 
 /**
- * 风控规则（表 risk_rule）。对应迁移脚本 V27__create_risk_tables.sql。
- * params 为按类型定义的 JSON 串，由对应求值器解析校验。
+ * 风控规则（表 finflow_risk.risk_rule）。由 V27 建表，M10/V36 起归属风控库 finflow_risk。
+ * params 为按类型定义的 JSON 串，由对应求值器解析校验；
+ * version 为当前版本号，每次变更 +1，历史快照见 {@link RiskRuleVersion}。
  */
 @Getter
 @Setter
-@TableName("risk_rule")
+@TableName(value = "risk_rule", schema = "finflow_risk")
 public class RiskRule {
 
     @TableId(type = IdType.AUTO)
@@ -37,6 +38,9 @@ public class RiskRule {
     private Boolean enabled;
 
     private String remark;
+
+    /** 当前版本号：每次变更 +1，与 risk_rule_version.version 对应。 */
+    private Integer version;
 
     private LocalDateTime createdAt;
 

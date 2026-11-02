@@ -1,5 +1,8 @@
 package org.example.finflowbackend.account;
 
+import org.example.finflowbackend.account.api.AccountErrorCode;
+import org.example.finflowbackend.account.api.AccountOwnerType;
+import org.example.finflowbackend.account.api.AccountSnapshot;
 import org.example.finflowbackend.account.entity.Account;
 import org.example.finflowbackend.account.mapper.AccountMapper;
 import org.example.finflowbackend.account.service.AccountService;
@@ -39,17 +42,17 @@ class AccountConcurrencyIntegrationTest extends IntegrationTestBase {
     void setUp() {
         // 账户表无外键，owner 用随机数避免多次运行冲突
         Long ownerId = System.nanoTime();
-        accountId = accountService.getOrCreate(AccountOwnerType.MERCHANT, ownerId, "CNY").getId();
+        accountId = accountService.getOrCreate(AccountOwnerType.MERCHANT, ownerId, "CNY").id();
     }
 
     @Test
     void getOrCreateIsIdempotent() {
         AccountOwnerType ownerType = AccountOwnerType.MERCHANT;
         Long ownerId = System.nanoTime();
-        Account first = accountService.getOrCreate(ownerType, ownerId, "CNY");
-        Account second = accountService.getOrCreate(ownerType, ownerId, "CNY");
-        assertEquals(first.getId(), second.getId());
-        assertEquals(0L, first.getAvailableBalance());
+        AccountSnapshot first = accountService.getOrCreate(ownerType, ownerId, "CNY");
+        AccountSnapshot second = accountService.getOrCreate(ownerType, ownerId, "CNY");
+        assertEquals(first.id(), second.id());
+        assertEquals(0L, first.availableBalance());
     }
 
     @Test

@@ -12,15 +12,15 @@ import org.example.finflowbackend.auth.dto.RefreshTokenRequest;
 import org.example.finflowbackend.auth.dto.RegisterRequest;
 import org.example.finflowbackend.auth.dto.SessionResponse;
 import org.example.finflowbackend.auth.dto.TokenResponse;
-import org.example.finflowbackend.auth.dto.UserInfoResponse;
+import org.example.finflowbackend.auth.api.UserInfoResponse;
 import org.example.finflowbackend.auth.service.AuthService;
 import org.example.finflowbackend.auth.service.CaptchaService;
 import org.example.finflowbackend.auth.web.ClientInfo;
-import org.example.finflowbackend.auth.web.CurrentUserHolder;
 import org.example.finflowbackend.common.api.ApiResponse;
 import org.example.finflowbackend.common.api.PageResponse;
-import org.example.finflowbackend.system.dto.MenuTreeNode;
-import org.example.finflowbackend.system.service.RbacAuthorityService;
+import org.example.finflowbackend.common.context.CurrentUserHolder;
+import org.example.finflowbackend.system.api.MenuTreeNode;
+import org.example.finflowbackend.system.api.RbacAuthorityApi;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -43,10 +43,10 @@ public class AuthController {
 
     private final AuthService authService;
     private final CaptchaService captchaService;
-    private final RbacAuthorityService rbacAuthorityService;
+    private final RbacAuthorityApi rbacAuthorityService;
 
     public AuthController(AuthService authService, CaptchaService captchaService,
-                          RbacAuthorityService rbacAuthorityService) {
+                          RbacAuthorityApi rbacAuthorityService) {
         this.authService = authService;
         this.captchaService = captchaService;
         this.rbacAuthorityService = rbacAuthorityService;

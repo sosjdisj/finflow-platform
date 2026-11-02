@@ -43,7 +43,7 @@ public class Merchant {
     /** Webhook 回调地址，阶段 9 投递时使用。 */
     private String webhookUrl;
 
-    /** 状态，取值见 {@link org.example.finflowbackend.merchant.MerchantStatus}。 */
+    /** 状态，取值见 {@link org.example.finflowbackend.merchant.api.MerchantStatus}。 */
     private String status;
 
     private LocalDateTime createdAt;
