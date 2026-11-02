@@ -1,6 +1,6 @@
 ---
 name: finflow-dev
-description: FinFlow 支付平台项目的分步开发约定。开发 FinFlow 项目代码、执行开发步骤 S01–S42、或用户提到 FinFlow 的某个模块（支付/清分/结算/对账/风控/退款等）时使用 — 先读本约定与步骤报告再动手。
+description: FinFlow 支付平台项目的分步开发约定。开发 FinFlow 项目代码、执行开发步骤 S01–S42 或微服务演进步骤 M01–M17、或用户提到 FinFlow 的某个模块（支付/清分/结算/对账/风控/退款等）、或涉及微服务拆分与 Spring Cloud 引入时使用 — 先读本约定与对应步骤报告再动手。
 ---
 
 # FinFlow 开发约定
@@ -9,8 +9,8 @@ description: FinFlow 支付平台项目的分步开发约定。开发 FinFlow �
 
 ## 步骤纪律
 
-1. 步骤清单在仓库根目录 `FinFlow分步开发报告.md`。执行任何步骤前，先读取该文件中对应步骤的「范围 / 做什么 / 不做 / 验收」四段内容。
-2. 一次只做一个步骤（S01–S42），不跳步、不合并、不顺手做相邻步骤的内容。
+1. 步骤清单在仓库根目录：`FinFlow分步开发报告.md`（S01–S42）与 `FinFlow微服务演进执行报告.md`（M01–M17）。执行任何步骤前，先读取对应文件中该步骤的「范围 / 做什么 / 不做 / 完成标志」内容。
+2. 一次只做一个步骤，不跳步、不合并、不顺手做相邻步骤的内容；S 与 M 两套编号互不混用。S42 是可选步骤且已取消，其内容由 M16、M17 覆盖，不要单独执行。
 3. 涉及建表、状态机、接口定义时，先输出表结构或类设计请用户确认，确认后再写代码。
 4. 验收不过不前进：当前步骤有问题，先修复当前步骤，不带病进入下一步。
 5. 每步完成后必须能编译、能启动、核心逻辑有单测，才允许进入下一步。
@@ -36,9 +36,23 @@ description: FinFlow 支付平台项目的分步开发约定。开发 FinFlow �
 
 ## 技术基线
 
-Java 25 + Spring Boot 4.1 + Spring Security + MyBatis-Plus + MySQL 8.0 + Redis + Kafka + Flyway；前端 Vue 3 + TypeScript + Vite + Pinia + Element Plus + ECharts + vue-tsc。架构为模块化单体（包结构按 auth / merchant / payment / refund / account / ledger / clearing / settlement / reconciliation / risk / webhook / notification / audit / system / common 划分），不引入微服务。
+Java 25 + Spring Boot 4.1 + Spring Security + MyBatis-Plus + MySQL 8.0 + Redis + Kafka + Flyway；前端 Vue 3 + TypeScript + Vite + Pinia + Element Plus + ECharts + vue-tsc。当前架构为模块化单体（包结构按 auth / merchant / payment / refund / account / ledger / clearing / settlement / reconciliation / risk / webhook / notification / audit / system / common 划分）。
+
+微服务演进按 `FinFlow微服务演进执行报告.md` 执行（M01–M17）：目标形态为「运营后台单体 + 开放平台网关 + 渠道服务 + 风控服务」四个部署单元，Spring Cloud Alibaba（Nacos 注册配置 + Sentinel 流控熔断）在 M08 之后按业务诉求逐步引入，不得提前引入。
+
+## 微服务演进约定（M01–M17）
+
+1. 资金主链路 payment / refund / account / ledger 不拆，保持同库同事务。
+2. 一次只拆一个服务，拆完观察后再动下一个。
+3. 每个服务拆出后必须保留回退路径（可切回进程内调用）。
+4. Spring Cloud Alibaba 组件只在演进报告「组件与引入时机」一节对应的步骤引入；没有业务诉求的组件（Seata / RocketMQ / Dubbo / Stream / Bus）不引入。
+5. 跨 schema 禁止 join，跨库数据只走对方 api 接口或事件投影。
+6. 同步调用必须有超时预算与降级策略；能异步的一律走 Kafka 事件。
+7. 事件契约集中在 contract 模块，字段与语义只增不改。
+8. 资金类一致性不引入分布式事务框架，统一用「本地事务 + 事件 + 对账兜底」。
 
 ## 任务接收方式
 
-- 用户给出步骤编号（如「做 S12」）时，按报告里该步骤的四段内容执行，完成后按「验收」标准自测并汇报。
-- 用户描述模糊时，先对照报告确认是哪一步、范围边界是什么，与用户确认后再开始。
+- 用户给出 S 编号（如「做 S12」）时，按 `FinFlow分步开发报告.md` 该步骤的四段内容执行，完成后按「验收」标准自测并汇报。
+- 用户给出 M 编号（如「做 M07」）时，按 `FinFlow微服务演进执行报告.md` 该步骤的四段内容执行，完成后按「完成标志」自测并汇报。
+- 用户描述模糊时，先对照两份报告确认是哪一步、范围边界是什么，与用户确认后再开始。
