@@ -1,0 +1,63 @@
+# 渠道服务（M08）profile：与 backend 同源打包（pom 的 repackage-channel-service），
+# 以 java -jar finflow-backend-*-channel.jar --spring.profiles.active=channel 启动。
+server:
+  # backend 8080 / fake-channel 8090 / 网关 8091 / 渠道服务 8092
+  port: 8092
+
+spring:
+  application:
+    name: finflow-channel
+  # M14 配置中心导入：必须写在 profile 文档里（非 profile 阶段 enabled 还是父配置的 false）。
+  # SCA 默认本地文档优先（LOCAL），运行时阈值只在 Nacos 定义，yaml 不重复声明。
+  config:
+    import:
+      - optional:nacos:finflow-common.yaml
+      - optional:nacos:${spring.application.name}.yaml
+  # 库结构迁移由 backend 的 Flyway 统一执行（含 finflow_channel 跨库 RENAME），渠道服务只读写渠道表
+  flyway:
+    enabled: false
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:finflow}?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: ${MYSQL_USERNAME:root}
+    password: ${MYSQL_PASSWORD:2369}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  cloud:
+    nacos:
+      discovery:
+        # 渠道服务必须注册，backend 才能按服务名 finflow-channel 调用；
+        # application.yaml 的默认值是 false（backend 进程内模式不接注册中心），此处须显式打开
+        enabled: ${FINFLOW_NACOS_ENABLED:true}
+        server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
+      # M14：渠道参数 / 流控阈值从配置中心热读，独立进程必须打开（父配置默认 false）
+      config:
+        enabled: ${FINFLOW_NACOS_CONFIG_ENABLED:true}
+        server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
+    sentinel:
+      transport:
+        dashboard: ${SENTINEL_DASHBOARD:127.0.0.1:8858}
+        # 与 backend（8719）错开，同机双进程不抢端口
+        port: 8720
+      eager: true
+  autoconfigure:
+    # 渠道服务不消费消息、不访问 Redis；关掉对应自动配置，避免无意义连接与健康检查告警
+    exclude:
+      - org.springframework.boot.kafka.autoconfigure.KafkaAutoConfiguration
+      - org.springframework.boot.data.redis.autoconfigure.DataRedisAutoConfiguration
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # M15：渠道服务也要被 Prometheus 抓取，才能按服务看板对比
+        include: health,metrics,prometheus
+
+finflow:
+  channel:
+    # 渠道适配器在渠道服务进程内运行；provider=true 才注册被 backend 调用的内部操作端点
+    mode: local
+    provider: true
+    # 入口流控 qps 归 TunableConfig（代码默认 200，Nacos finflow.channel.flow.qps 覆盖）
+  remote-channel:
+    # 真实渠道网关（本地为 fake-channel 模拟器 8090）
+    base-url: ${FINFLOW_CHANNEL_BASE_URL:http://localhost:8090}
+    secret: ${FINFLOW_CHANNEL_SECRET:finflow-fake-channel-secret}

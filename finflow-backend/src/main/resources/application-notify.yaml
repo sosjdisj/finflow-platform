@@ -1,0 +1,75 @@
+# 通知服务（M16）profile：与 backend 同源打包（pom 的 repackage-notify-service），
+# 以 java -jar finflow-backend-*-notify.jar --spring.profiles.active=notify 启动。
+server:
+  # backend 8080 / 网关 8091 / 渠道 8092 / 风控 8093 / 通知 8094
+  port: 8094
+
+spring:
+  application:
+    name: finflow-notify
+  # M14 配置中心导入：必须写在 profile 文档里，非 profile 阶段 import 解析时
+  # spring.cloud.nacos.config.enabled 还是父配置的 false（见 application.yaml 顶部注释）。
+  config:
+    import:
+      - optional:nacos:finflow-common.yaml
+      - optional:nacos:${spring.application.name}.yaml
+  # 库结构迁移由 backend 的 Flyway 统一执行，通知服务只读写 finflow_notify 下的表
+  flyway:
+    enabled: false
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:finflow}?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: ${MYSQL_USERNAME:root}
+    password: ${MYSQL_PASSWORD:2369}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  data:
+    redis:
+      # 事件消费去重（EventDeduplicationService）与重试任务锁
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+  kafka:
+    # 订阅支付 / 退款 / 结算 / 风控 / 对账事件与商户通知配置事件
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+  mail:
+    # 邮件渠道（S33）：host 为空时自动降级为只记日志（SKIPPED），站内信不受影响
+    host: ${MAIL_HOST:}
+    port: ${MAIL_PORT:25}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+  cloud:
+    nacos:
+      discovery:
+        # 通知服务必须注册，backend 才能按服务名 finflow-notify 调用；
+        # application.yaml 的默认值是 false（backend 进程内模式不接注册中心），此处须显式打开
+        enabled: ${FINFLOW_NACOS_ENABLED:true}
+        server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
+      # M14：运行时可调参数（含 finflow.webhook.max-retries）从配置中心热读
+      config:
+        enabled: ${FINFLOW_NACOS_CONFIG_ENABLED:true}
+        server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
+    sentinel:
+      transport:
+        dashboard: ${SENTINEL_DASHBOARD:127.0.0.1:8858}
+        # 与 backend（8719）/ 渠道（8720）/ 风控（8721）错开，同机多进程不抢端口
+        port: 8723
+      eager: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # M15：通知服务也要被 Prometheus 抓取，才能按服务看板对比
+        include: health,metrics,prometheus
+  health:
+    mail:
+      # 邮件是可选渠道：SMTP 不可达只影响邮件（站内信仍落库），不应让整个通知服务被判 DOWN
+      enabled: false
+
+finflow:
+  notify:
+    # 本进程不是远程调用方：管理端点直接走进程内实现
+    mode: local
+    # provider=true 才注册被 backend 调用的内部管理端点、并启用事件投影读模型
+    provider: true
+    # 消费与 Webhook 重试在本进程执行（backend 侧同一开关置 false）
+    worker: true

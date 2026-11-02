@@ -1,0 +1,67 @@
+# 风控服务（M11）profile：与 backend 同源打包（pom 的 repackage-risk-service），
+# 以 java -jar finflow-backend-*-risk.jar --spring.profiles.active=risk 启动。
+server:
+  # backend 8080 / 渠道服务 8092 / 风控服务 8093
+  port: 8093
+
+spring:
+  application:
+    name: finflow-risk
+  # M14 配置中心导入：必须写在 profile 文档里，非 profile 阶段的 import 解析时
+  # spring.cloud.nacos.config.enabled 还是父配置的 false（见 application.yaml 顶部注释）。
+  # SCA 默认本地文档优先（LOCAL），所以运行时阈值只在 Nacos 定义，yaml 不重复声明。
+  config:
+    import:
+      - optional:nacos:finflow-common.yaml
+      - optional:nacos:${spring.application.name}.yaml
+  # 库结构迁移由 backend 的 Flyway 统一执行，风控服务只读写 finflow_risk 下的表
+  flyway:
+    enabled: false
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:finflow}?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: ${MYSQL_USERNAME:root}
+    password: ${MYSQL_PASSWORD:2369}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+  kafka:
+    # 拦截事件（REVIEW / REJECT）仍由风控进程发布，消费方在 backend
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+  cloud:
+    nacos:
+      discovery:
+        # 风控服务必须注册，backend 才能按服务名 finflow-risk 调用；
+        # application.yaml 的默认值是 false（backend 进程内模式不接注册中心），此处须显式打开
+        enabled: ${FINFLOW_NACOS_ENABLED:true}
+        server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
+      # M14：风控阈值 / 流控阈值从配置中心热读，独立进程必须打开（父配置默认 false）
+      config:
+        enabled: ${FINFLOW_NACOS_CONFIG_ENABLED:true}
+        server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
+    sentinel:
+      transport:
+        dashboard: ${SENTINEL_DASHBOARD:127.0.0.1:8858}
+        # 与 backend（8719）/ 渠道服务（8720）错开，同机多进程不抢端口
+        port: 8721
+      eager: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # M15：风控服务也要被 Prometheus 抓取，才能按服务看板对比
+        include: health,metrics,prometheus
+
+finflow:
+  risk:
+    # 风控服务进程内直接执行求值；provider=true 才注册被 backend 调用的内部决策端点
+    mode: local
+    provider: true
+    decision:
+      # 与 backend 同值：风控进程内的限时预算
+      timeout-ms: ${FINFLOW_RISK_TIMEOUT_MS:500}
+      on-timeout: ${FINFLOW_RISK_TIMEOUT_STRATEGY:allow}
+    # 入口流控 qps 归 TunableConfig（代码默认 200，Nacos finflow.risk.flow.qps 覆盖）

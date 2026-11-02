@@ -1,0 +1,57 @@
+# 批处理服务（M17）profile：与 backend 同源打包（pom 的 repackage-batch-service），
+# 以 java -jar finflow-backend-*-batch.jar --spring.profiles.active=batch 启动。
+server:
+  # backend 8080 / 网关 8091 / 渠道 8092 / 风控 8093 / 通知 8094 / 批处理 8095
+  port: 8095
+
+spring:
+  application:
+    name: finflow-batch
+  # M14 配置中心导入：与 notify 同样写在 profile 文档里（非 profile 阶段 import 解析时
+  # spring.cloud.nacos.config.enabled 还是父配置的 false）
+  config:
+    import:
+      - optional:nacos:finflow-common.yaml
+      - optional:nacos:${spring.application.name}.yaml
+  # 库结构迁移由 backend 的 Flyway 统一执行；对账表在 finflow 主库，本进程只读写这些表
+  flyway:
+    enabled: false
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:finflow}?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: ${MYSQL_USERNAME:root}
+    password: ${MYSQL_PASSWORD:2369}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  data:
+    redis:
+      # 夜间任务当日占位与系统配置 Cache-Aside
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+  kafka:
+    # 对账异常事件（S33 通知源）仍在匹配事务提交后发布
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+  cloud:
+    nacos:
+      discovery:
+        enabled: ${FINFLOW_NACOS_ENABLED:true}
+        server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
+      config:
+        enabled: ${FINFLOW_NACOS_CONFIG_ENABLED:true}
+        server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
+    sentinel:
+      transport:
+        dashboard: ${SENTINEL_DASHBOARD:127.0.0.1:8858}
+        # 与 backend（8719）/ 渠道（8720）/ 风控（8721）/ 通知（8723）错开
+        port: 8724
+      eager: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics,prometheus
+
+finflow:
+  batch:
+    # 夜间对账匹配在本进程执行（backend 侧同一开关置 false，回退时切回 true）
+    worker: true
