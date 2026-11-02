@@ -123,7 +123,8 @@ class RiskIntegrationTest extends IntegrationTestBase {
 
         PaymentOrderResponse first = paymentProcessService.createAndProcess(
                 createRequest("RK-FREQ-1-", 10000L, null, null));
-        assertEquals("PENDING", orderStatus(first.id()));
+        // 渠道路由回调异步推进状态，这里只断言首单未被风控拦截
+        assertTrue(List.of("PENDING", "PROCESSING", "PAID").contains(orderStatus(first.id())));
         assertEquals("ALLOW", riskEvent(first.id()).get("verdict"));
 
         // 同商户窗口内第二笔：频次命中累 30 分，达到审核阈值
@@ -145,7 +146,8 @@ class RiskIntegrationTest extends IntegrationTestBase {
 
         PaymentOrderResponse first = paymentProcessService.createAndProcess(
                 createRequest(merchantId, "RK-IP-1-", 10000L, ip, null));
-        assertEquals("PENDING", orderStatus(first.id()));
+        // 渠道路由回调异步推进状态，这里只断言首单未被风控拦截
+        assertTrue(List.of("PENDING", "PROCESSING", "PAID").contains(orderStatus(first.id())));
 
         // 同 IP 第二个商户：命中累 30 分进 REVIEW
         PaymentOrderResponse second = paymentProcessService.createAndProcess(
@@ -163,7 +165,8 @@ class RiskIntegrationTest extends IntegrationTestBase {
         PaymentOrderResponse order = paymentProcessService.createAndProcess(
                 createRequest("RK-OFF-", 1_000_001L, null, null));
 
-        assertEquals("PENDING", orderStatus(order.id()));
+        // 渠道路由回调异步推进状态，这里只断言订单未被风控拦截
+        assertTrue(List.of("PENDING", "PROCESSING", "PAID").contains(orderStatus(order.id())));
         assertEquals("ALLOW", riskEvent(order.id()).get("verdict"));
     }
 
