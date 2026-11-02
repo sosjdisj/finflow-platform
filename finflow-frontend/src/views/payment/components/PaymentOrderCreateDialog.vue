@@ -82,6 +82,9 @@ async function submit(): Promise<void> {
     ElMessage.success(`订单已创建：${created.platformOrderNo}，约 5 秒后变为已支付`)
     visible.value = false
     emit('created')
+  } catch {
+    // 建单/受理失败也会留下一笔失败订单，刷新列表让用户看到该单实际支付方式与状态
+    emit('created')
   } finally {
     submitting.value = false
   }

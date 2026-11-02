@@ -92,6 +92,9 @@ async function submit(): Promise<void> {
     ElMessage.success('退款已受理，结果以渠道回调为准')
     visible.value = false
     emit('created')
+  } catch {
+    // 受理失败退款单会落 FAILED，刷新列表/详情让状态实时回到实际值
+    emit('created')
   } finally {
     submitting.value = false
   }
