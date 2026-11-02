@@ -33,9 +33,14 @@ class ReconciliationUploadIntegrationTest extends IntegrationTestBase {
 
     private static final SecureRandom RANDOM = new SecureRandom();
 
-    /** 唯一随机未来账单日期：宽范围高熵偏移，避免连续两次全量运行撞 uk(channel_code, bill_date)。 */
+    /** 本轮随机未来日期基准 + 用例内自增序号：保证同一轮各用例的 (channel_code, bill_date) 互不重复。 */
+    private static final LocalDate DATE_BASE = LocalDate.now().plusDays(1 + RANDOM.nextInt(1000));
+    private static final java.util.concurrent.atomic.AtomicInteger DATE_SEQ =
+            new java.util.concurrent.atomic.AtomicInteger();
+
+    /** 随机基准保证跨轮隔离，自增序号保证同轮用例不与 uk(channel_code, bill_date) 互撞。 */
     private LocalDate uniqFutureDate() {
-        return LocalDate.now().plusDays(1 + RANDOM.nextInt(1000));
+        return DATE_BASE.plusDays(1000L * DATE_SEQ.getAndIncrement());
     }
 
     /** 示例账单（V24 定义的模拟格式）：3 行数据，金额为分。 */
