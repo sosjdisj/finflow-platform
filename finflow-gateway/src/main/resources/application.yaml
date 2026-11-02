@@ -1,0 +1,74 @@
+server:
+  # 后端 8080、假渠道 8090、Nacos 控制台 8081，网关取 8091
+  port: 8091
+
+spring:
+  application:
+    name: finflow-gateway
+  config:
+    # M14 配置中心：共享 dataId + 本服务 dataId；optional 前缀保证未部署 Nacos 时仍可本地启动，
+    # 是否真正导入由下面的 enabled 决定（网关没有 profile 文件，靠 FINFLOW_NACOS_CONFIG_ENABLED=true 打开）。
+    # SCA 默认本地文档优先（LOCAL），运行时阈值只在 Nacos 定义，yaml 不重复声明。
+    import:
+      - optional:nacos:finflow-common.yaml
+      - optional:nacos:${spring.application.name}.yaml
+  data:
+    redis:
+      # M13 边缘限流与 nonce 防重放，与 backend 共用同一 Redis（同一份 nonce 存储可跨入口防重放）
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+  # M15：WebFlux 日志要读得到 MDC traceId，必须让 Reactor 上下文自动传播（否则网关日志只有线程名）
+  reactor:
+    context-propagation: auto
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
+      config:
+        # 网关只承载路由与边缘准入，默认不强制依赖配置中心；生产用 FINFLOW_NACOS_CONFIG_ENABLED=true 打开
+        enabled: ${FINFLOW_NACOS_CONFIG_ENABLED:false}
+        server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
+        namespace: ${FINFLOW_NACOS_NAMESPACE:}
+        group: ${FINFLOW_NACOS_GROUP:FINFLOW_GROUP}
+        file-extension: yaml
+        refresh-enabled: true
+        fail-fast: false
+    sentinel:
+      transport:
+        # Sentinel 控制台（docker compose 的 sentinel-dashboard 服务）
+        dashboard: ${SENTINEL_DASHBOARD:127.0.0.1:8858}
+        port: 8719
+      # 启动即向控制台注册，避免等到第一次流量才出现
+      eager: true
+
+finflow:
+  gateway:
+    # M14 服务发现：默认 lb://finflow-backend 由注册中心解析；本地无注册中心时用 FINFLOW_BACKEND_URI 回退固定地址
+    backend-uri: ${FINFLOW_BACKEND_URI:lb://finflow-backend}
+    # 网关 ↔ backend 内部令牌，必须与 backend 的 finflow.internal.token 同值
+    internal-token: ${FINFLOW_INTERNAL_TOKEN:finflow-internal-dev-token}
+    # 注入档案（凭证 + 配额）缓存秒数：越短越安全、越长 backend 压力越小
+    profile-cache-seconds: ${FINFLOW_GATEWAY_PROFILE_CACHE:15}
+    # 取注入档案的超时预算，超时按系统错误（不放行）
+    profile-timeout-millis: ${FINFLOW_GATEWAY_PROFILE_TIMEOUT:2000}
+  openapi:
+    # M14：与 backend 的 finflow.openapi 完全同键同值（共享 finflow-common.yaml），验签窗口不再两边各写一份
+    timestamp-window-seconds: ${FINFLOW_OPENAPI_TIMESTAMP_WINDOW:300}
+    nonce-ttl-seconds: ${FINFLOW_OPENAPI_NONCE_TTL:600}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # M15：网关补 Prometheus 输出，与 backend / 渠道 / 风控按同一 application 标签聚合
+        include: health,info,metrics,prometheus
+  metrics:
+    tags:
+      application: ${spring.application.name}
+  tracing:
+    sampling:
+      probability: ${FINFLOW_TRACING_SAMPLE:1.0}
+  endpoint:
+    health:
+      show-details: always
